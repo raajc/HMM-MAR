@@ -87,6 +87,7 @@ for subji = 1:size(bst_source_data,2)
 end
     
 %% Rearranging Schaefer 100 Parcel Data so it matches eventual mapping template 
+% For OSL Tools formatting
 
 % % Set up the Import Options and import the data
 % opts = spreadsheetImportOptions("NumVariables", 1);
@@ -133,6 +134,15 @@ end
 % end
 %% Load TMS-EEG Data and configure T at original data sample (i.e. 1000 Hz)
 %source_data = myHMM_data; 
+% Import Values from brainstorm time series
+load('matrix_concat_220915_1240.mat')
+musc2 = Value;
+load('matrix_concat_220915_1250.mat')
+musc3 = Value;
+
+source_data = cell(2, 1);
+source_data{1, 1} = musc2';
+source_data{2, 1} = musc3';
 
 timepoints = 2000; 
 
@@ -147,17 +157,32 @@ end
 %% Changing format of data for downsampling to work
 %source_data = cat(1, source_data{:});
 %T = cat(1,T{:});
-%% APPLYING FLIP FUNCTION
+%% APPLYING FLIP FUNCTION %skip
 options = [];
 %options.noruns = 1;
 %options.maxlag = 29;
 options.verbose = 1;
 [flips,scorepath] = findflip(source_data,T, options);
 source_data = flipdata(source_data,T,flips);
+
+%% Fixing rank deficiency
+for ii = 1:length(source_data)
+    data = source_data{ii,1};
+    [u,s,v] = svd(data,'econ');
+    s_size = length(diag(s));
+    s_rank = rank(s);
+    c = fit(1:s_size, log(diag(s)),'linear','Weights',[ones(1,s_rank) zeros(1, s_size-rank_s)]);
+    d = zeros(1,s_size-s_rank);
+    for jj = 1:s_size-s_rank
+        d(jj) = exp(c(ii+s_rank));
+    end
+    s_new = diag([diag(s(1:s_rank,1:s_rank))' d]);
+    source_data{ii,1} = u*s_new*v';
+end
+
 %% Performing HMM
 
 K = 8;
-
 hmm_data = source_data;
 
 options = [];
@@ -168,13 +193,17 @@ options.covtype = 'full';
 options.zeromean= 1; % 0 is mean, 1 is functional connectivity 
 options.standardise = 1;
 %options.filter = [4 45];
-options.pca = size(hmm_data{1},2) * 2; 
-%options.downsample = 100;
+options.pca = 120; %size(hmm_data{1},2)*2; 
+options.downsample = 200;
 options.Fs = 1000; 
-%options.useParallel = 0; 
+options.useParallel = 0; 
 options.verbose = true; 
 options.onpower = 0;
 options.leakagecorr= -1; 
+options.inittype = 'HMM-MAR';
+options.initTestSmallerK = 0;
+options.initrep = 5;
+options.initcyc = 25;
 %newfs = options.downsample; 
 
 % Importantly, if stochastic inference is to be used, the inputs (both data and T; see above)
@@ -182,10 +211,11 @@ options.leakagecorr= -1;
 % with the data for subject 1, and T{1} will contain a vector with the trial lengths for subject 1 
 % (or just length(data{1}) if this is continuous data with no breaks).
 
-options.BIGNbatch = 5;
-%options.BIGNinitbatch = 5;
+% options.BIGNbatch = 5;
+% options.BIGNinitbatch = 5;
 
 [hmm, Gamma, Xi, vpath, GammaInit, residuals, fehist] = hmmmar(hmm_data,T,options); 
+% Download OSL tools but remove old version of HMM MAR embedded
 %% If data is in array format for resampling
 
 % %Resampling T

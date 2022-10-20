@@ -235,6 +235,7 @@ else
     % Leakage correction
     if options.leakagecorr ~= 0 
         data = leakcorr(data,T,options.leakagecorr);
+        disp('Leakage correction complete');
     end
     % Hilbert envelope
     if options.onpower
@@ -256,6 +257,7 @@ else
     end    
     % Embedding
     if length(options.embeddedlags) > 1  
+        data.X = single(data.X);
         [data,T] = embeddata(data,T,options.embeddedlags);
         elmsg = '(embedded)';
     else
@@ -289,6 +291,8 @@ else
     else
         options.ndim = size(data.X,2);
     end
+    % Re-introduce double format:
+    data.X = double(data.X);
     % Downsampling
     if options.downsample > 0 
        [data,T] = downsampledata(data,T,options.downsample,options.Fs); 

@@ -88,10 +88,12 @@ else
     end
     if isstruct(X)
         if isempty(d), d = size(X.X,2); verbose = 0; end
-        [A,B,e] = pca(X.X,'Centered',true);
+%         [A,B,e] = pca(X.X,'Centered',true);
+        [A,B,e] = pca_mod_unweighted(X.X,'Centered',true);
     else
         if isempty(d), d = size(X,2); verbose = 0; end
-        [A,B,e] = pca(X,'Centered',true);
+        %originally: [A,B,e] = pca(X,'Centered',true);
+        [A,B,e] = pca_mod_unweighted(X,'Centered',true);
     end
 end
 e = cumsum(e)/sum(e);

@@ -100,7 +100,9 @@ if init_k < options.K
     end
 end
 
+% Commented OUT
 data.C = data.C(:,1:options.K);
+
 % Note - initGamma_random uses DD=1 so that there are lots of transition times, which
 % helps the inference not get stuck in a local minimum. options.DirichletDiag is
 % then used inside hmmtrain when computing the free energy
@@ -120,15 +122,15 @@ while keep_trying
     hmm = hmmhsinit(hmm);
     if isfield(hmm.train,'Gamma'), hmm.train = rmfield(hmm.train,'Gamma'); end
     [hmm,residuals] = obsinit(data,T,hmm,Gamma);
-    try
+%     try
         [hmm,Gamma,~,fehist] = hmmtrain(data,T,hmm,Gamma,residuals);
         fehist(end) = [];
         keep_trying = false;
-    catch
-        notries = notries + 1; 
-        if notries > 10, error('Initialisation went wrong'); end
-        disp('Something strange happened in the initialisation - repeating')
-    end
+%     catch
+%         notries = notries + 1; 
+%         if notries > 10, error('Initialisation went wrong'); end
+%         disp('Something strange happened in the initialisation - repeating')
+%     end
     hmm.train.verbose = options.verbose;
     hmm.train.plotGamma = options.plotGamma;
 end

@@ -7,7 +7,7 @@ if isstruct(data)
 else % just a matrix
     ndim = size(data,2);
 end
-X = zeros(sum(T-tp_less),ndim*length(embeddedlags));
+X = zeros(sum(T-tp_less),ndim*length(embeddedlags),'single');
 acc = 0;
 for n=1:length(T)
     if isstruct(data)
