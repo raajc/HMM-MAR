@@ -25,3 +25,9 @@ hidden_state_inference/.DS_Store
 hidden_state_inference/test/test
 
 *.mexmaci64
+flip-test-data-musc2-3.mat
+flip-test-musc2-3.mat
+matrix_concat_220915_1240.mat
+matrix_concat_220915_1250.mat
+noflip-test-data-musc2-3.mat
+noflip-test-model-musc2-3.mat
