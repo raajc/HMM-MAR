@@ -25,6 +25,7 @@ function [hmm,Gamma,Xi,fehist,maxchhist] = hmmtrain(data,T,hmm,Gamma,residuals,f
 
 if nargin<6, fehist = []; end
 maxchhist = [];
+Xi = [];
 
 cyc_to_go = 0;
 setxx;
@@ -45,21 +46,21 @@ for cycle = 1:hmm.train.cyc
         if hmm.K>1 || cycle==1
             % state inference
             if cycle > 1 && useChGamma,  Gamma0 = Gamma; end
-            [Gamma,~,Xi] = hsinference(data,T,hmm,residuals,[],XX);
-            status = checkGamma(Gamma,T,hmm.train);
-            
+            [Gamma,~,Xi,scale] = hsinference(data,T,hmm,residuals,[],XX);
+            checkGamma(Gamma,T,hmm.train);
+         
             % check local minima
-            epsilon = 1; show_message = true;
-            while status == 1
-                hmm = hmmperturb(hmm,epsilon);
-                if show_message
-                    disp('Stuck in bad local minima - perturbing the model and retrying...')
-                    show_message = false;
-                end
-                [Gamma,~,Xi] = hsinference(data,T,hmm,residuals,[],XX);
-                status = checkGamma(Gamma,T,hmm.train);
-                epsilon = epsilon * 2;
-            end
+%             epsilon = 1; show_message = true;
+%             while status == 1
+%                 hmm = hmmperturb(hmm,epsilon);
+%                 if show_message
+%                     disp('Stuck in bad local minima - perturbing the model and retrying...')
+%                     show_message = false;
+%                 end
+%                 [Gamma,~,Xi,scale] = hsinference(data,T,hmm,residuals,[],XX);
+%                 status = checkGamma(Gamma,T,hmm.train);
+%                 epsilon = epsilon * 2;
+%             end
             
             % any state to remove?
             [as,hmm,Gamma,Xi] = getactivestates(hmm,Gamma,Xi);
@@ -67,15 +68,12 @@ for cycle = 1:hmm.train.cyc
                 if any(as==0)
                     cyc_to_go = hmm.train.cycstogoafterevent;
                     data.C = data.C(:,as==1);
-                    [Gamma,~,Xi] = hsinference(data,T,hmm,residuals,[],XX);
+                    [Gamma,~,Xi,scale] = hsinference(data,T,hmm,residuals,[],XX);
                     checkGamma(Gamma,T,hmm.train);
                 end
                 if sum(hmm.train.active)==1
-                    if isfield(hmm.train,'distribution') && strcmp(hmm.train.distribution,'logistic')
-                        fehist(end+1) = sum(evalfreeenergylogistic(T,Gamma,Xi,hmm,residuals,XX));
-                    else
-                        fehist(end+1) = sum(evalfreeenergy(data.X,T,Gamma,Xi,hmm,residuals,XX));
-                    end
+                    fehist(end+1) = sum(evalfreeenergy(data.X,T,Gamma,Xi,hmm,residuals,XX,[]));
+                    
                     if hmm.train.verbose
                         fprintf('cycle %i: All the points collapsed in one state, free energy = %g \n',...
                             cycle,fehist(end));
@@ -103,11 +101,8 @@ for cycle = 1:hmm.train.cyc
         end
        
         %%%% Free energy computation
-        if isfield(hmm.train,'distribution') && strcmp(hmm.train.distribution,'logistic')
-            fehist(end+1) = sum(evalfreeenergylogistic(T,Gamma,Xi,hmm,residuals,XX));
-        else
-            fehist(end+1) = sum(evalfreeenergy(data.X,T,Gamma,Xi,hmm,residuals,XX));
-        end
+        fehist(end+1) = sum(evalfreeenergy(data.X,T,Gamma,Xi,hmm,residuals,XX,[])); 
+        
         strwin = ''; if hmm.train.meancycstop>1, strwin = ' windowed'; end
         if length(fehist) > (hmm.train.meancycstop+1)
             chgFrEn = mean( fehist(end:-1:(end-hmm.train.meancycstop+1)) - ...
@@ -158,9 +153,13 @@ for cycle = 1:hmm.train.cyc
     % Observation model
     if hmm.train.updateObs
         setxx
-        hmm = obsupdate(T,Gamma,hmm,residuals,XX,XXGXX);
+        if length(hmm.train.embeddedlags_batched) > 1
+            hmm = obsupdate(Gamma_unwrapped,hmm,residuals,XX,XXGXX);
+        else
+            hmm = obsupdate(Gamma,hmm,residuals,XX,XXGXX);
+        end
     end
-    
+  
     % Transition matrices and initial state
     if hmm.train.updateP
         hmm = hsupdate(Xi,Gamma,T,hmm);
@@ -208,6 +207,26 @@ for cycle = 1:hmm.train.cyc
     end
  
 end
+
+% check local minimum where states are too similar
+[hmm,Gamma,Xi,re_do_M] = pruneRedundantStates(hmm,Gamma,Xi);
+if re_do_M
+    disp('Some states were too similar and will be pruned')
+    % Observation model
+    if hmm.train.updateObs
+        setxx
+        if length(hmm.train.embeddedlags_batched) > 1
+            hmm = obsupdate(Gamma_unwrapped,hmm,residuals,XX,XXGXX);
+        else
+            hmm = obsupdate(Gamma,hmm,residuals,XX,XXGXX);
+        end
+    end
+    % Transition matrices and initial state
+    if hmm.train.updateP
+        hmm = hsupdate(Xi,Gamma,T,hmm);
+    end
+end
+
 
 for k = 1:K
     if isfield(hmm.state(k),'cache')

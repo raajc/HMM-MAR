@@ -15,6 +15,8 @@ N = length(T); K = options.K;
 subjfe_init = zeros(N,3);
 loglik_init = zeros(N,1);
 pcaprec = options.pcapred>0;
+sharedcovmat = strcmp(options.covtype,'uniquefull') || strcmp(options.covtype,'uniquediag') || ...
+    strcmp(options.covtype,'sharedfull') || strcmp(options.covtype,'shareddiag');
 tp_less = max(options.embeddedlags) + max(-options.embeddedlags);
 if options.downsample > 0, downs_ratio = (options.downsample/options.Fs);
 else, downs_ratio = 1; 
@@ -27,7 +29,6 @@ if options.BIGinitStrategy == 2 % run through a subset of the subjects only
     options = rmfield(options,'orders');
     options.verbose = 0;
     options.cyc = options.BIGinitcyc;
-    options.initrep = 1; options.initcyc = 1;
     hmm = hmmmar(Xin(I),T(I),options);
     hmm.train.Sind = formindexes(hmm.train.orders,hmm.train.S)==1;
     options = options_copy;
@@ -67,7 +68,17 @@ if options.BIGinitStrategy == 2 % run through a subset of the subjects only
 end
 
 X = loadfile(Xin{1},T{1},options); ndim = size(X,2);
-S = options.S==1; regressed = sum(S,1)>0;
+
+if options.pcapred>0
+    Sind = true(options.pcapred,ndim);
+else
+    Sind = formindexes(options.orders,options.S)==1;
+end
+if ~options.zeromean, Sind = [true(1,ndim); Sind]; end
+if isempty(Sind), regressed = true(1,length(options.S)); 
+else, regressed = sum(Sind==1,1)>0;
+end
+
 if isfield(options,'B') && ~isempty(options.B)
     npred = length(options.orders)*size(options.B,2) + (~options.zeromean);
 elseif pcaprec
@@ -147,8 +158,7 @@ for rep = 1:options.BIGinitrep
             options.downsample = 0; % done in loadfile.m
             options.grouping = [];
             options.cyc = options.BIGinitcyc;
-            options.initrep = 1; options.initcyc = 1;  
-            options.verbose = 0;
+            options.verbose = 1;
             %options.initcriterion = 'FreeEnergy';
             if length(Ti)==1, options.useParallel = 0; end
             [hmm_i,Gamma,Xi] = hmmmar(X,Ti,options);
@@ -171,12 +181,6 @@ for rep = 1:options.BIGinitrep
             Dir_alpha_prior = hmm_i.prior.Dir_alpha;
             hmm_i.train.orders = formorders(hmm_i.train.order,hmm_i.train.orderoffset,...
                 hmm_i.train.timelag,hmm_i.train.exptimelag);
-            if options.pcapred>0
-                Sind = true(options.pcapred,ndim);
-            else
-                Sind = formindexes(hmm_i.train.orders,hmm_i.train.S)==1;
-            end
-            if ~hmm_i.train.zeromean, Sind = [true(1,ndim); Sind]; end
         end
         if options.BIGverbose
             fprintf('Init: repetition %d, batch %d \n',rep,ii);
@@ -204,7 +208,7 @@ for rep = 1:options.BIGinitrep
             end
             hmm_init = struct('train',hmm_i.train);
             hmm_init.train.active = ones(1,K);
-            if strcmp(options.covtype,'uniquefull') || strcmp(options.covtype,'uniquediag')
+            if sharedcovmat
                 hmm_init.Omega = hmm_i.Omega; 
             end
         else
@@ -242,12 +246,12 @@ for rep = 1:options.BIGinitrep
                 % hence, an underestimation of the group ones
             end
         end
-        if ii>1 && (strcmp(options.covtype,'uniquefull') || strcmp(options.covtype,'uniquediag'))
+        if ii>1 && sharedcovmat
             hmm_init.Omega.Gam_shape = hmm_init.Omega.Gam_shape + ...
                 hmm_i.Omega.Gam_shape - hmm_i.prior.Omega.Gam_shape;
             hmm_init.Omega.Gam_rate = hmm_init.Omega.Gam_rate + ...
                 hmm_i.Omega.Gam_rate - hmm_i.prior.Omega.Gam_rate;
-            if strcmp(options.covtype,'uniquediag')
+            if strcmp(options.covtype,'uniquediag') || strcmp(options.covtype,'shareddiag')
                 hmm_init.Omega.Gam_rate(~regressed) = 0;
             end
         end
@@ -293,9 +297,9 @@ for rep = 1:options.BIGinitrep
                 end
             end
             hmm_init.prior = hmm_i.prior;
-            if strcmp(options.covtype,'uniquediag')
+            if strcmp(options.covtype,'uniquediag') || strcmp(options.covtype,'shareddiag')
                 hmm_init.prior.Omega.Gam_rate = 0.5 * range_data;
-            elseif strcmp(options.covtype,'uniquefull')
+            elseif strcmp(options.covtype,'uniquefull') || strcmp(options.covtype,'sharedfull')
                 hmm_init.prior.Omega.Gam_rate = diag(range_data);
             end
         else

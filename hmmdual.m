@@ -1,4 +1,4 @@
-function [hmm,Gamma,vpath] = hmmdual(data,T,hmm,Gamma,Xi,residuals)
+function [hmm,Gamma,vpath,Xi,LL,datat] = hmmdual(data,T,hmm,Gamma,Xi,residuals)
 %
 % Dual estimation of the HMM, first Gamma and then the HMM structure
 %
@@ -17,6 +17,9 @@ function [hmm,Gamma,vpath] = hmmdual(data,T,hmm,Gamma,Xi,residuals)
 % vpath            estimated Viterbi path
 %
 % Author: Diego Vidaurre, OHBA, University of Oxford (2019)
+%
+% edits to work for gradient computation (for Fisher kernel):
+% Christine Ahrends, Aarhus University 2022
 
 % to fix potential compatibility issues with previous versions
 hmm = versCompatibilityFix(hmm);
@@ -93,7 +96,7 @@ if length(train.pca) > 1 || train.pca > 0
     train.ndim = size(train.A,2);
     train.S = ones(train.ndim);
     orders = formorders(train.order,train.orderoffset,train.timelag,train.exptimelag);
-    train.Sind = formindexes(orders,train.S);
+    train.Sind = formindexes(orders,train.S) == 1;
 end
 % Downsampling
 if train.downsample > 0
@@ -103,20 +106,20 @@ end
 if isempty(residuals) && ~do_HMM_pca
     if ~isfield(hmm.train,'Sind')
         orders = formorders(hmm.train.order,hmm.train.orderoffset,hmm.train.timelag,hmm.train.exptimelag);
-        hmm.train.Sind = formindexes(orders,hmm.train.S);
+        hmm.train.Sind = formindexes(orders,hmm.train.S) == 1;
     end
-    residuals =  getresiduals(data.X,T,hmm.train.Sind,hmm.train.maxorder,hmm.train.order,...
+    residuals =  getresiduals(data.X,T,hmm.train.S,hmm.train.maxorder,hmm.train.order,...
         hmm.train.orderoffset,hmm.train.timelag,hmm.train.exptimelag,hmm.train.zeromean);
 end
 
 if isempty(Gamma)   
-    [Gamma,~,Xi] = hsinference(data,T,hmm,residuals); 
+    [Gamma,~,Xi,LL] = hsinference(data,T,hmm,residuals); 
 elseif isempty(Xi) 
     Xi = approximateXi(Gamma,T,hmm);
 end
 setxx;
 
-hmm = obsupdate(T,Gamma,hmm,residuals,XX,XXGXX);
+hmm = obsupdate(Gamma,hmm,residuals,XX,XXGXX);
 hmm = hsupdate(Xi,Gamma,T,hmm);
 
 if nargout > 1
@@ -125,6 +128,7 @@ end
 if nargout > 2
     vpath = hmmdecode(data,T,hmm,1,residuals,0);
 end
+datat = data;
 
 end
 

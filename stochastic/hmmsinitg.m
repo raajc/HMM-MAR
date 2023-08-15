@@ -18,7 +18,9 @@ X = loadfile(Xin{1},T{1},options); ndim = size(X,2);
 subjfe_init = zeros(N,3);
 loglik_init = zeros(N,1);
 pcaprec = options.pcapred>0;
-S = options.S==1; regressed = sum(S,1)>0;
+sharedcovmat = strcmp(options.covtype,'uniquefull') || strcmp(options.covtype,'uniquediag') || ...
+        strcmp(options.covtype,'sharedfull') || strcmp(options.covtype,'shareddiag');
+
 if pcaprec
     npred = options.pcapred + (~options.zeromean);
 else
@@ -38,7 +40,7 @@ if strcmp(options.covtype,'diag')
     subj_err_init = zeros(1,ndim,K); subj_time_init = zeros(K,1);
 elseif strcmp(options.covtype,'full')
     subj_err_init = zeros(ndim,ndim,K); subj_time_init = zeros(K,1);
-elseif strcmp(options.covtype,'uniquediag')
+elseif strcmp(options.covtype,'uniquediag') || strcmp(options.covtype,'shareddiag')
     subj_err_init = zeros(1,ndim); 
 else
     subj_err_init = zeros(ndim,ndim);  
@@ -64,6 +66,7 @@ for i = 1:N
             Sind = formindexes(options.orders,options.S)==1;
         end        
         if ~options.zeromean, Sind = [true(1,ndim); Sind]; end
+        regressed = sum(Sind,1)>0;
         options.useParallel = useParallel;
     end
     % get the range of the data to set the prior later
@@ -129,7 +132,7 @@ for i = 1:N
             end
             subj_err_init(:,:,k) = subj_err_init(:,:,k) + (e' .* repmat(Gamma(:,k)',ndim,1)) * e;
             subj_time_init(k) = subj_time_init(k) + sum(Gamma(:,k));
-        elseif strcmp(options.covtype,'uniquediag')
+        elseif strcmp(options.covtype,'uniquediag') || strcmp(options.covtype,'shareddiag')
             if ~isempty(hmm.state(k).W.Mu_W)
                 e = (Y - XX * hmm.state(k).W.Mu_W).^2;
             else
@@ -148,7 +151,7 @@ for i = 1:N
         end
     end
 end
-if (strcmp(options.covtype,'uniquefull') || strcmp(options.covtype,'uniquediag'))
+if sharedcovmat
     hmm.Omega.Gam_shape = subj_time_init + hmm.prior.Omega.Gam_shape;
     hmm.Omega.Gam_rate = subj_err_init + hmm.prior.Omega.Gam_rate;
 end
@@ -274,7 +277,7 @@ for k=1:hmm.K
         defstateprior(k)=struct('beta',[],'Omega',[],'Mean',[]);
     elseif (strcmp(train.covtype,'diag') || strcmp(train.covtype,'full')) && ~pcapred
         defstateprior(k)=struct('sigma',[],'alpha',[],'Omega',[],'Mean',[]);
-    elseif (strcmp(train.covtype,'uniquediag') || strcmp(train.covtype,'uniquefull')) && pcapred
+    elseif sharedcovmat && pcapred
         defstateprior(k)=struct('beta',[],'Mean',[]);
     else
         defstateprior(k)=struct('sigma',[],'alpha',[],'Mean',[]);
@@ -311,10 +314,10 @@ for k=1:hmm.K
     
 end
 
-if strcmp(hmm.train.covtype,'uniquefull')
+if strcmp(hmm.train.covtype,'uniquefull') || strcmp(hmm.train.covtype,'sharedfull')
     hmm.prior.Omega.Gam_shape = ndim+0.1-1;
     hmm.prior.Omega.Gam_rate = diag(r);
-elseif strcmp(hmm.train.covtype,'uniquediag')
+elseif strcmp(hmm.train.covtype,'uniquediag') || strcmp(hmm.train.covtype,'shareddiag')
     hmm.prior.Omega.Gam_shape = 0.5 * (ndim+0.1-1);
     hmm.prior.Omega.Gam_rate = 0.5 * r;
 end

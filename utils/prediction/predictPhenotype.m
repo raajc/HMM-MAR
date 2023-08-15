@@ -1,7 +1,6 @@
-function [predictedY,predictedYD,YD,stats] = predictPhenotype (Yin,Din,options,varargin)
+function [predictedY,predictedYD,YD,stats] = predictPhenotype(Yin,Din,options,varargin)
 %
-% Kernel ridge regression or nearest-neighbour estimation using
-% a distance matrix using (stratified) LOO. 
+% Kernel ridge regression estimation using a distance matrix using (stratified) LOO. 
 % Using this means that the HMM was run once, out of the cross-validation loop
 %
 % INPUT
@@ -10,9 +9,11 @@ function [predictedY,predictedYD,YD,stats] = predictPhenotype (Yin,Din,options,v
 %           is to be predicted, then Yin should be encoded by a
 %           (no. subjects by no. classes) matrix, with zeros or ones
 %           indicator entries.
-% Din       (no. subjects by no. subjects) matrix of distances between
-%           subjects, calculated (for example) by computeDistMatrix or
-%           computeDistMatrix_AVFC
+% Din       (no. subjects by no. subjects) matrix calculated (for 
+%           example) by hmm_kernel, computeDistMatrix or
+%           computeDistMatrix_AVFC. For the Gaussian kernel, this should be
+%           distances/divergences. For the linear kernel, this should be
+%           the kernel itself (dot-product).   
 % options   Struct with the prediction options, with fields:
 %   + alpha - for method='KRR', a vector of weights on the L2 penalty on the regression
 %           By default: [0.0001 0.001 0.01 0.1 0.4 0.7 1.0 10 100]
@@ -25,6 +26,7 @@ function [predictedY,predictedYD,YD,stats] = predictPhenotype (Yin,Din,options,v
 %   + CVfolds - prespecified CV folds for the outer loop
 %   + biascorrect - whether we correct for bias in the estimation 
 %                   (Smith et al. 2019, NeuroImage)
+%   + shape - which kernel to use ('linear' or 'gaussian')
 %   + verbose -  display progress?
 % cs        optional (no. subjects X no. subjects) dependency structure matrix with
 %           specifying possible relations between subjects (e.g., family
@@ -52,8 +54,17 @@ function [predictedY,predictedYD,YD,stats] = predictPhenotype (Yin,Din,options,v
 %
 % Author: Diego Vidaurre, OHBA, University of Oxford
 %         Steve Smith, fMRIB University of Oxford
+% adapted to different kernels:
+% Christine Ahrends, Aarhus University, 2022
 
-Din(eye(size(Din,1))==1) = 0; 
+if ~isfield(options, 'shape')
+    shape = 'linear';
+else
+    shape = options.shape;
+end
+if strcmp(shape, 'gaussian')
+    Din(eye(size(Din,1))==1) = 0; 
+end
 [N,q] = size(Yin);
 
 which_nan = false(N,1); 
@@ -82,15 +93,19 @@ if ~isfield(options,'alpha')
 else
     alpha = options.alpha;
 end
-if ~isfield(options,'sigmafact')
-    sigmafact = [1/5 1/3 1/2 1 2 3 5];
+if strcmp(shape, 'gaussian')
+    if ~isfield(options,'sigmafact')
+        sigmafact = [1/5 1/3 1/2 1 2 3 5];
+    else
+        sigmafact = options.sigmafact;
+    end
 else
-    sigmafact = options.sigmafact;
+    sigmafact = 1;
 end
 if ~isfield(options,'K')
-    K = 1:min(50,round(0.5*N));
+    KN = 1:min(50,round(0.5*N));
 else
-    K = options.K; 
+    KN = options.K; 
 end
 
 if ~isfield(options,'CVscheme'), CVscheme = [10 10];
@@ -99,12 +114,12 @@ if ~isfield(options,'CVfolds'), CVfolds = [];
 else, CVfolds = options.CVfolds; end
 % if ~isfield(options,'biascorrect'), biascorrect = 0;
 % else, biascorrect = options.biascorrect; end
-if ~isfield(options,'verbose'), verbose = 1;
+if ~isfield(options,'verbose'), verbose = 0;
 else, verbose = options.verbose; end
 
 % check correlation structure
 allcs = []; 
-if (nargin>4) && ~isempty(varargin{1})
+if (nargin>3) && ~isempty(varargin{1})
     cs = varargin{1};
     if ~isempty(cs)
         is_cs_matrix = (size(cs,2) == size(cs,1));
@@ -124,7 +139,7 @@ else, cs = [];
 end
 
 % get confounds
-if (nargin>5) && ~isempty(varargin{2})
+if (nargin>4) && ~isempty(varargin{2})
     confounds = varargin{2};
     confounds = confounds - repmat(mean(confounds),N,1);
     deconfounding = 1;
@@ -146,10 +161,12 @@ if isempty(CVfolds)
     if CVscheme(1)==1
         folds = {1:N};
     elseif q == 1
+        
         Yin_copy = Yin; Yin_copy(isnan(Yin)) = realmax;
-        folds = cvfolds(Yin_copy,CVscheme(1),allcs);
+        folds = cvfolds(Yin_copy,CVscheme(1),allcs,1);
     else % no stratification
-        folds = cvfolds(randn(size(Yin,1),1),CVscheme(1),allcs);
+        
+        folds = cvfolds(randn(size(Yin,1),1),CVscheme(1),allcs,1);
     end
 else
     folds = CVfolds;
@@ -193,7 +210,7 @@ for ifold = 1:length(folds)
         QDin = Dii(ind,ind); 
         QN = length(ind);
         
-        Qfolds = cvfolds(Yii,CVscheme(2),Qallcs); % we stratify
+        Qfolds = cvfolds(Yii,CVscheme(2),Qallcs,1); % we stratify
 
         % deconfounding business
         if deconfounding
@@ -221,15 +238,19 @@ for ifold = 1:length(folds)
                 
                 QJ = Qfolds{Qifold}; Qji=setdiff(1:QN,QJ);
                 QD = QDin(Qji,Qji);
-                QY = QYin(Qji,:); Qmy = mean(QY); QY=QY-Qmy;
+                QY = QYin(Qji,:); Qmy = mean(QY); QY = QY-Qmy;
                 Nji = length(Qji);
                 QD2 = QDin(QJ,Qji);
                 
-                sigmabase = auto_sigma(QD);
-                sigma = sigmf * sigmabase;
-                
-                K = gauss_kernel(QD,sigma);
-                K2 = gauss_kernel(QD2,sigma);
+                if strcmp(shape, 'gaussian')
+                    sigmabase = auto_sigma(QD);
+                    sigma = sigmf * sigmabase;
+                    K = gauss_kernel(QD,sigma);
+                    K2 = gauss_kernel(QD2,sigma);
+                elseif strcmp(shape, 'linear')
+                    K = QD;
+                    K2 = QD2;
+                end
                 I = eye(Nji);
                 ridg_pen_scale = mean(diag(K));
                 
@@ -247,15 +268,20 @@ for ifold = 1:length(folds)
         
         [~,m] = min(Dev(:)); % Pick the one with the lowest deviance
         [ialph,isigm] = ind2sub(size(Dev),m);
-        sigmf = sigmafact(isigm);
-        sigmabase = auto_sigma(D);
-        sigma = sigmf * sigmabase;
         alph = alpha(ialph);
-        
         Dii = D(ind,ind); D2ii = D2(:,ind);
         
-        K = gauss_kernel(Dii,sigma);
-        K2 = gauss_kernel(D2ii,sigma);
+        if strcmp(shape, 'gaussian')
+            sigmf = sigmafact(isigm);
+            sigmabase = auto_sigma(D);
+            sigma = sigmf * sigmabase;
+            K = gauss_kernel(Dii,sigma);
+            K2 = gauss_kernel(D2ii,sigma);
+        elseif strcmp(shape, 'linear')
+            K = Dii;
+            K2 = D2ii;
+            sigmf = NaN;
+        end
         Nji = length(ind);
         I = eye(Nji);
         
@@ -294,7 +320,7 @@ for ifold = 1:length(folds)
 %         end
 %             
 %         [~,ik] = min(Dev); % Pick the one with the lowest deviance
-%         k = K(ik);
+%         k = KN(ik);
 %         for j = 1:length(J)
 %             [~,order] = sort(D(:,j));
 %             Yordered = Y(order,:);
@@ -308,10 +334,10 @@ for ifold = 1:length(folds)
         YD(J,ii) = Yin(J,ii);
         YmeanD(J,ii) = Ymean(J,ii);
         if deconfounding % in order to later estimate prediction accuracy in deconfounded space
-            [~,~,YD(J,ii)] = deconfoundPhen(YD(J,ii),confounds(J,ii),betaY,interceptY);
+            [~,~,YD(J,ii)] = deconfoundPhen(YD(J,ii),confounds(J,:),betaY,interceptY);
             % original space
-            predictedY(J,ii) = confoundPhen(predictedY(J,ii),confounds(J,ii),betaY,interceptY);
-            Ymean(J,ii) = confoundPhen(YmeanD(J,ii),confounds(J,ii),betaY,interceptY);
+            predictedY(J,ii) = confoundPhen(predictedY(J,ii),confounds(J,:),betaY,interceptY);
+            Ymean(J,ii) = confoundPhen(YmeanD(J,ii),confounds(J,:),betaY,interceptY);
         end
     
 %     if biascorrect % we do this in the original space
@@ -329,8 +355,11 @@ for ifold = 1:length(folds)
     
     end
     
-    disp(['Fold ' num2str(ifold) ])
-    
+    %disp(['Fold ' num2str(ifold) ])
+    stats.alpha(ifold) = alph;
+    stats.sigma(ifold) = sigmf;
+
+
 end
 
 stats.sse = zeros(q,1);

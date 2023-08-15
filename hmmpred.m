@@ -44,8 +44,8 @@ train = hmm.train;
 [orders,order] = formorders(train.order,train.orderoffset,train.timelag,train.exptimelag);
 
 if nargin<5 || isempty(residuals)
-    train.Sind = formindexes(orders,train.S);
-    [residuals,Wgl] = getresiduals(X,T,train.Sind,train.maxorder,train.order,...
+    train.Sind = formindexes(orders,train.S) == 1;
+    [residuals,Wgl] = getresiduals(X,T,train.S,train.maxorder,train.order,...
         train.orderoffset,train.timelag,train.exptimelag,train.zeromean);
 else
     Wgl = zeros(length(orders)*ndim+(~hmm.train.zeromean),ndim);

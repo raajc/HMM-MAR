@@ -1,4 +1,4 @@
-function [residuals,W] = getresiduals (X,T,Sind,maxorder,order,orderoffset,...
+function [residuals,W] = getresiduals (X,T,S,maxorder,order,orderoffset,...
     timelag,exptimelag,zeromean,W)
 %
 % Compute residuals - useful when using a global model to remove global trends
@@ -18,13 +18,13 @@ if nargin<10, W = []; end
 
 N = length(T);
 
-if any(Sind(:)==0) 
+if ~isempty(S) && any(S(:)==0) 
     [~,order] = formorders(order,orderoffset,timelag,exptimelag);
     if isempty(W)
-        [W,~,~,residuals] = mlmar(X,T,Sind==0,maxorder,order,orderoffset,timelag,...
+        [W,~,~,residuals] = mlmar(X,maxorder,T,double(S==0),order,orderoffset,timelag,...
         exptimelag,zeromean);
     else
-        [~,~,~,residuals] = mlmar(X,T,Sind==0,maxorder,order,orderoffset,timelag,...
+        [~,~,~,residuals] = mlmar(X,maxorder,T,double(S==0),order,orderoffset,timelag,...
             exptimelag,zeromean,W);
     end
 else
@@ -32,7 +32,7 @@ else
     residuals = zeros(sum(T)-length(T)*maxorder,size(X,2)); 
     for in=1:N
         t0 = sum(T(1:in-1));
-        t = sum(T(1:in-1)) - (in-1)*maxorder;
+        t = t0 - (in-1)*maxorder;
         residuals(t+1:t+T(in)-maxorder,:) = X(t0+maxorder+1:t0+T(in),:);
     end
 end

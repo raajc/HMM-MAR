@@ -15,8 +15,8 @@ function [Path,Xi] = hmmdecode(data,T,hmm,type,residuals,preproc)
 %               which the hmm model was trained; 1 by default.
 %
 % OUTPUT
-% vpath         (T x 1) maximum likelihood state sequence (type=1) OR
-% vpath         (T x K) state time courses
+% Path         (T x 1) maximum likelihood state sequence (type=1) OR
+% Path         (T x K) state time courses
 % Xi            joint probability of past and future states conditioned on data
 %                   (empty if Viterbi path is computed) 
 %
@@ -140,7 +140,7 @@ if preproc % Adjust the data if necessary
         train.ndim = size(train.A,2);
         train.S = ones(train.ndim);
         orders = formorders(train.order,train.orderoffset,train.timelag,train.exptimelag);
-        train.Sind = formindexes(orders,train.S);
+        train.Sind = formindexes(orders,train.S) == 1;
     end
     % Downsampling
     if train.downsample > 0
@@ -169,9 +169,9 @@ K = length(hmm.state);
 if isempty(residuals) && ~do_HMM_pca
     if ~isfield(hmm.train,'Sind')
         orders = formorders(hmm.train.order,hmm.train.orderoffset,hmm.train.timelag,hmm.train.exptimelag);
-        hmm.train.Sind = formindexes(orders,hmm.train.S);
+        hmm.train.Sind = formindexes(orders,hmm.train.S) == 1;
     end
-    residuals =  getresiduals(data,T,hmm.train.Sind,hmm.train.maxorder,hmm.train.order,...
+    residuals =  getresiduals(data,T,hmm.train.S,hmm.train.maxorder,hmm.train.order,...
         hmm.train.orderoffset,hmm.train.timelag,hmm.train.exptimelag,hmm.train.zeromean);
 end
 
@@ -316,7 +316,16 @@ else
         if do_HMM_pca
             B = obslike(data(t0+1:t0+T(n),:),hmm,[]);
         else
-            B = obslike(data(t0+1:t0+T(n),:),hmm,residuals(s0+1:s0+T(n)-order,:));
+            %B = obslike(data(t0+1:t0+T(n),:),hmm,residuals(s0+1:s0+T(n)-order,:));
+            if ~isfield(hmm.train,'distribution') || strcmp(hmm.train.distribution,'Gaussian')
+                B = obslike(data(t0+1:t0+T(n),:),hmm,residuals(s0+1:s0+T(n)-order,:));
+            elseif strcmp(hmm.train.distribution ,'bernoulli')
+                B = obslikebernoulli(data(t0+1:t0+T(n),:),hmm);
+            elseif strcmp(hmm.train.distribution ,'poisson')
+                B = obslikepoisson(data(t0+1:t0+T(n),:),hmm);
+            elseif strcmp(hmm.train.distribution ,'logistic')
+                B = obslikelogistic([],hmm,residuals(s0+1:s0+T(n)-order,:),XX);
+            end
         end
         B(B<realmin) = realmin;
         

@@ -1,4 +1,4 @@
-function [hmm,Gamma,fehist] = hmmmar_init(data,T,options,Sind)
+function [hmm,Gamma,fehist] = hmmmar_init(data,T,options)
 %
 % Initialise the hidden Markov chain using HMM-MAR
 %
@@ -19,7 +19,8 @@ if ~isfield(options,'maxorder')
     options.maxorder = order; 
 end
 
-if options.initTestSmallerK % Run two initializations for each K less than requested K, plus options.initrep K
+% Run two initializations for each K less than requested K, plus options.initrep K
+if options.initTestSmallerK 
     init_k = [repmat(1:(options.K-1),1,2) options.K*ones(1,options.initrep)];
     init_k = init_k(end:-1:1);
 else % Standard behaviour, test specified K options.initrep times
@@ -34,11 +35,11 @@ hmm = cell(length(init_k),1);
 
 if options.useParallel && length(init_k) > 1 % not very elegant
     parfor it = 1:length(init_k)
-        [hmm{it},Gamma{it},fehist{it}] = run_initialization(data,T,options,Sind,init_k(it));
+        [hmm{it},Gamma{it},fehist{it}] = run_initialization(data,T,options,init_k(it));
         felast(it) = fehist{it}(end);
         maxfo(it) = mean(getMaxFractionalOccupancy(Gamma{it},T,options));
         if options.verbose
-            if options.nessmodel
+            if options.episodic
                 fprintf('Init run %2d, Free Energy = %f \n',it,felast(it));
             else
                 fprintf('Init run %2d, %2d->%2d states, Free Energy = %f \n',...
@@ -48,11 +49,11 @@ if options.useParallel && length(init_k) > 1 % not very elegant
     end
 else
     for it = 1:length(init_k)
-        [hmm{it},Gamma{it},fehist{it}] = run_initialization(data,T,options,Sind,init_k(it));
+        [hmm{it},Gamma{it},fehist{it}] = run_initialization(data,T,options,init_k(it));
         felast(it) = fehist{it}(end);
         maxfo(it) = mean(getMaxFractionalOccupancy(Gamma{it},T,options));
         if options.verbose
-            if options.nessmodel
+            if options.episodic
                 fprintf('Init run %2d, Free Energy = %f \n',it,felast(it));
             else
                 fprintf('Init run %2d, %2d->%2d states, Free Energy = %f \n',...
@@ -80,13 +81,15 @@ fehist = fehist{s};
 
 end
 
-function [hmm,Gamma,fehist] = run_initialization(data,T,options,Sind,init_k)
+function [hmm,Gamma,fehist] = run_initialization(data,T,options,init_k)
 % INPUTS
 % - data,T,options,Sind <same as hmmmar_init>
 % - init_k is the number of states to use for this initialization
 
 % Need to adjust the worker dirichletdiags if testing smaller K values
-%if ~options.nessmodel && init_k < options.K
+%if ~options.episodic && init_k < options.K
+Sind = options.Sind; 
+
 if init_k < options.K
     for j = 1:length(options.DirichletDiag)
         p = options.DirichletDiag(j)/(options.DirichletDiag(j) + options.K - 1); % Probability of remaining in same state
@@ -100,9 +103,10 @@ if init_k < options.K
     end
 end
 
-% Commented OUT
 data.C = data.C(:,1:options.K);
-
+if ~isfield(options,'ehmm_priorOFFvsON'), ehmm_priorOFFvsON = []; 
+else, ehmm_priorOFFvsON = options.ehmm_priorOFFvsON; 
+end
 % Note - initGamma_random uses DD=1 so that there are lots of transition times, which
 % helps the inference not get stuck in a local minimum. options.DirichletDiag is
 % then used inside hmmtrain when computing the free energy
@@ -111,7 +115,7 @@ while keep_trying
     Gamma = initGamma_random(T-options.maxorder,options.K,...
         min(median(double(T))/10,500),...
         options.Pstructure,options.Pistructure,...
-        options.nessmodel,options.priorOFFvsON);
+        options.episodic,ehmm_priorOFFvsON);
     hmm = struct('train',struct());
     hmm.K = options.K;
     hmm.train = options;
@@ -122,16 +126,20 @@ while keep_trying
     hmm = hmmhsinit(hmm);
     if isfield(hmm.train,'Gamma'), hmm.train = rmfield(hmm.train,'Gamma'); end
     [hmm,residuals] = obsinit(data,T,hmm,Gamma);
-%     try
+    try
         [hmm,Gamma,~,fehist] = hmmtrain(data,T,hmm,Gamma,residuals);
         fehist(end) = [];
         keep_trying = false;
-%     catch
-%         notries = notries + 1; 
-%         if notries > 10, error('Initialisation went wrong'); end
-%         disp('Something strange happened in the initialisation - repeating')
-%     end
+    catch exception
+        notries = notries + 1; 
+        if notries > 10
+            disp('Initialisation went wrong'); 
+            throw(exception)  
+        end
+        disp('Something strange happened in the initialisation - repeating')
+    end
     hmm.train.verbose = options.verbose;
+    hmm.train.cyc = options.cyc;
     hmm.train.plotGamma = options.plotGamma;
 end
 %fe = fehist(end);

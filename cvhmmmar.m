@@ -73,9 +73,9 @@ if ~isobject(options.cvfolds)
     options.cvfolds = cvpartition(length(T),'KFold',options.cvfolds);
 end
 nfolds = options.cvfolds.NumTestSets;
-orders = formorders(options.order,options.orderoffset,options.timelag,options.exptimelag);
-Sind = formindexes(orders,options.S);
-if ~options.zeromean, Sind = [true(1,size(Sind,2)); Sind]; end
+%orders = formorders(options.order,options.orderoffset,options.timelag,options.exptimelag);
+%Sind = formindexes(orders,options.S) == 1;
+%if ~options.zeromean, Sind = [true(1,size(Sind,2)); Sind]; end
 maxorder = options.maxorder;
 cv = zeros(nfolds,1);
 rcv_rand = zeros(nfolds,1);
@@ -184,7 +184,7 @@ for fold = 1:nfolds
             options_r = rmfield(options_r,'maxorder');
         end
         hmmtr_r = hmmmar (datatr,Ttr,options_r);
-        [~,~,~,LL_r] = hsinference(datate,Tte,hmmtr_r,[],[],[],[],true);
+        [~,~,~,LL_r] = hsinference(datate,Tte,hmmtr_r,[],[],[],[],[],true);
         LL_r = sum(log(LL_r)) / size(datate.X,1); % get average 
     end
             
@@ -197,18 +197,18 @@ for fold = 1:nfolds
         options = rmfield(options,'maxorder');
     end
     hmmtr = hmmmar (datatr,Ttr,options); 
-    hmmtr.train.Sind = Sind;
+    %hmmtr.train.Sind = Sind;
     hmmtr.train.maxorder = maxorder;
     
     % test
-    [~,~,~,LL] = hsinference(datate,Tte,hmmtr,[],[],[],[],true);
+    [~,~,~,LL] = hsinference(datate,Tte,hmmtr,[],[],[],[],[],true);
     cv(fold) = sum(log(LL)) / size(datate.X,1); % get average
     if get_ratio_rand
         rcv_rand(fold) = cv(fold) - LL_r; % log(test / random)
     end
     % train
     if get_ratio_train
-        [~,~,~,LL] = hsinference(datatr,Ttr,hmmtr,[],[],[],[],true);
+        [~,~,~,LL] = hsinference(datatr,Ttr,hmmtr,[],[],[],[],[],true);
         LL = sum(log(LL)) / size(datatr.X,1); % get average
         rcv_train(fold) = LL - cv(fold); % log(train / test)
         %if rcv_train(fold)<0, keyboard; end

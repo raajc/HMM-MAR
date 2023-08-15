@@ -51,9 +51,10 @@ if completelags
     end
 end
 
-[hmm.train.orders,order] = formorders(hmm.train.order,hmm.train.orderoffset,hmm.train.timelag,hmm.train.exptimelag);
+[hmm.train.orders,order] = formorders(hmm.train.order,hmm.train.orderoffset,...
+    hmm.train.timelag,hmm.train.exptimelag);
 
-for k=1:K
+for k = 1:K
     if ~isfield(hmm.state(k),'train') || isempty(hmm.state(k).train)
         hmm.state(k).train = hmm.train;
     end
@@ -69,12 +70,6 @@ if iscell(X)
         if i==1, ndim = size(Y,2); end
         ind = (1:sum(T{i})-length(T{i})*order) + c;
         c = c + length(ind);
-        %else
-        %    ind = sum(T(1:i-1)) + (1:T(i));
-        %    Y = getresiduals(data(ind,:),T(i),Sind,hmm.train.maxorder,hmm.train.order,hmm.train.orderoffset,...
-        %        hmm.train.timelag,hmm.train.exptimelag,hmm.train.zeromean);
-        %    XX = formautoregr(data.X,T,orders,hmm.train.maxorder,hmm.train.zeromean,0,B,V);
-        %end
         if i==1
             XX2 = zeros(size(XX,2),size(XX,2),K);
             XXY = zeros(size(XX,2),ndim,K);
@@ -98,10 +93,10 @@ if iscell(X)
         c = c + length(ind);
         %sumT = sumT + size(Y,1); 
         if i==1
-            if strcmp(hmm.train.covtype,'uniquediag')
+            if strcmp(hmm.train.covtype,'uniquediag') || strcmp(hmm.train.covtype,'shareddiag')
                 hmm.Omega.Gam_rate = zeros(1,ndim); 
                 hmm.Omega.Gam_shape = 0; 
-            elseif strcmp(hmm.train.covtype,'uniquefull')
+            elseif strcmp(hmm.train.covtype,'uniquefull') || strcmp(hmm.train.covtype,'sharedfull')
                 hmm.Omega.Gam_rate = zeros(ndim); 
                 hmm.Omega.Gam_shape = 0; 
             elseif strcmp(hmm.train.covtype,'diag')
@@ -116,7 +111,7 @@ if iscell(X)
                 end
             end
         end
-        for k=1:K
+        for k = 1:K
             e = Y - XX * hmm.state(k).W.Mu_W;
             %ge = ge + e' * e;
             if strcmp(hmm.train.covtype,'diag')
@@ -127,7 +122,7 @@ if iscell(X)
                 hmm.state(k).Omega.Gam_shape = hmm.state(k).Omega.Gam_shape + sum(Gamma(ind,k));
                 hmm.state(k).Omega.Gam_rate = hmm.state(k).Omega.Gam_rate + ...
                     (e' .* repmat(Gamma(ind,k)',ndim,1)) * e;
-            elseif strcmp(hmm.train.covtype,'uniquediag')
+            elseif strcmp(hmm.train.covtype,'uniquediag') || strcmp(hmm.train.covtype,'shareddiag')
                 hmm.Omega.Gam_shape = hmm.Omega.Gam_shape + 0.5 * sum(Gamma(ind,k));
                 hmm.Omega.Gam_rate = hmm.Omega.Gam_rate + 0.5 *  sum( repmat(Gamma(ind,k),1,ndim) .* e.^2 );
             else
@@ -140,17 +135,15 @@ if iscell(X)
     
 else
     
+    setstateoptions;   
     ndim = size(X,2);
-    S = hmm.train.S==1; regressed = sum(S,1)>0;
-    Sind = formindexes(hmm.train.orders,hmm.train.S); hmm.train.Sind = Sind;
-    if ~hmm.train.zeromean, Sind = [true(1,size(X,2)); Sind]; end
-    Y = getresiduals(X,T,Sind,hmm.train.maxorder,hmm.train.order,hmm.train.orderoffset,...
-        hmm.train.timelag,hmm.train.exptimelag,hmm.train.zeromean);
+    Y = getresiduals(X,T,hmm.train.S,hmm.train.maxorder,hmm.train.order,...
+        hmm.train.orderoffset,hmm.train.timelag,hmm.train.exptimelag,hmm.train.zeromean);
     pred = zeros(size(Y));
     setxx; % build XX
     
     for k=1:K
-        setstateoptions;        
+             
         if hmm.train.uniqueAR
             XY = zeros(size(XX,1)*ndim,1);
             XGX = zeros(size(XX,2)/ndim,size(XX,2)/ndim);
@@ -199,11 +192,11 @@ else
     % end
     
     e = Y(:,regressed) - pred(:,regressed);
-    if strcmp(hmm.train.covtype,'uniquediag')
+    if strcmp(hmm.train.covtype,'uniquediag') || strcmp(hmm.train.covtype,'shareddiag')
        hmm.Omega.Gam_shape = 0.5 * sum(T);
        hmm.Omega.Gam_rate = zeros(1,ndim);
        hmm.Omega.Gam_rate(regressed) = 0.5 * sum( e.^2 );
-    elseif strcmp(hmm.train.covtype,'uniquefull')
+    elseif strcmp(hmm.train.covtype,'uniquefull') || strcmp(hmm.train.covtype,'sharedfull')
        hmm.Omega.Gam_shape = sum(T);
        hmm.Omega.Gam_rate = zeros(ndim);
        hmm.Omega.Gam_rate(regressed,regressed) =  (e' * e);

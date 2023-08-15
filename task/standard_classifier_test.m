@@ -187,14 +187,20 @@ elseif strcmp(classifier,'SVM') || strcmp(classifier,'SVM_rbf')
      if options.generalisationplot    
         Y_pred_genplot = reshape(Y_pred_genplot,[ttrial, ttrial*N,q]);
         for t=1:ttrial
-            Y_pred_genplot(t,:,:) = hardmax(squeeze(Y_pred_genplot(t,:,:)));
+            if q>1
+                Y_pred_genplot(t,:,:) = hardmax(squeeze(Y_pred_genplot(t,:,:)));
+            else
+                Y_pred_genplot(t,:,:) = squeeze(Y_pred_genplot(t,:,:))>0;
+            end
         end
     end
 elseif strcmp(classifier,'LDA')
     X = reshape(X,[ttrial*N,p]);
     [predictions_hard, predictions_soft] = LDApredict(model,repmat(eye(ttrial),N,1),X);
-    predictions_soft = exp(predictions_soft - repmat(max(predictions_soft,[],2),1,q));
-    predictions_soft = rdiv(predictions_soft,sum(predictions_soft,2)); 
+    if q>1
+        predictions_soft = exp(predictions_soft - repmat(max(predictions_soft,[],2),1,q));
+        predictions_soft = rdiv(predictions_soft,sum(predictions_soft,2)); 
+    end
 elseif strcmp(classifier,'KNN')
     if ~isfield(model,'K');model.K=1;end
     predictions_hard = zeros(ttrial,N,q);
@@ -235,15 +241,19 @@ elseif strcmp(classifier,'decisiontree');
 end
 
 %and compute accuracy metrics using hard classification output:
-Y = reshape(logical(Y),[ttrial*N q]);
+Y = reshape(logical(Y==1),[ttrial*N q]);
 predictions_hard=logical(predictions_hard);
 true_preds = all(~xor(predictions_hard,Y),2);
-acc=mean(true_preds);
+acc = mean(true_preds);
 acc_t = mean(reshape(true_preds,[ttrial,N]),2);
 if options.generalisationplot
     Y_true_genplot = repmat(permute(Ycopy,[4,1,2,3]),[ttrial,1,1,1]);
     Y_pred_genplot = reshape(Y_pred_genplot,[ttrial, ttrial,N,q]);
-    accplot = sum(logical(Y_true_genplot) & logical(Y_pred_genplot),4);
+    if q>1
+        accplot = sum(logical(Y_true_genplot) & logical(Y_pred_genplot),4);
+    else
+        accplot = ~xor(logical(Y_true_genplot),logical(Y_pred_genplot));
+    end
     genplot = squeeze(mean(accplot,3));
 else
     genplot=[];
@@ -255,7 +265,11 @@ function preds_hard = hardmax(Y_pred)
 if ndims(Y_pred)>2
     error('Wrong dimensions entered for computing predictions');
 end
-[~,a] = max(Y_pred,[],2);
+if size(Y_pred,2)>1
+    [~,a] = max(Y_pred,[],2);
+else
+    a = Y_pred>0;
+end
 preds_hard = zeros(size(Y_pred));
 for i=1:length(preds_hard)
     preds_hard(i,a(i))=1;

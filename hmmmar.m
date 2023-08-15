@@ -80,8 +80,8 @@ if stochastic_learn % data is a cell, either with strings or with matrices
     end
 else % data can be a cell or a matrix
     if isstruct(data) && isfield(data,'C') && ...
-            isfield(options,'nessmodel') && options.nessmodel
-        warning('data.C and options.nessmodel are not compatible')
+            isfield(options,'episodic') && options.episodic
+        warning('data.C and options.episodic are not compatible')
         data = data.X;
     end
     if iscell(T)
@@ -98,7 +98,7 @@ oldMatlab = ~isempty(strfind(ver,'2010')) || ~isempty(strfind(ver,'2010')) ...
     || ~isempty(strfind(ver,'2011')) || ~isempty(strfind(ver,'2012'));
 
 % set the matlab parallel computing environment
-if options.useParallel==1 && usejava('jvm')
+if options.useParallel==1 && usejava('jvm') && N > 1 && ~options.acrosstrial_constrained
     try
         if oldMatlab
             if matlabpool('size')==0
@@ -123,6 +123,9 @@ end
 
 if stochastic_learn
     
+    if options.episodic
+        error('Stochastic learning not yet implemented for ehmm model')
+    end
     % get PCA pre-embedded loadings
     if length(options.pca_spatial) > 1 || (options.pca_spatial > 0 && options.pca_spatial ~= 1)
         if ~isfield(options,'As')
@@ -160,8 +163,8 @@ if stochastic_learn
             end
         end
         options.ndim = size(options.A,2);
-        options.S = ones(options.ndim);
-        options.Sind = formindexes(options.orders,options.S);
+        options.S = true(options.ndim);
+        options.Sind = formindexes(options.orders,options.S)==1;
         if ~options.zeromean, options.Sind = [true(1,size(options.Sind,2)); options.Sind]; end
     else
         options.As = [];
@@ -200,8 +203,14 @@ if stochastic_learn
         options = rmfield(options,'Gamma');
         [hmm,info] = hmmsinitg(data,T,options,GammaInit);
     end % If both are specified, hmm is not used
-    if options.BIGcyc>1
-        [hmm,fehist,feterms,rho] = hmmstrain(data,T,hmm,info,options);
+    if options.BIGcyc>1 && options.repetitions>=1
+        hmm_init = hmm; fehist = Inf;
+        for it = 1:options.repetitions
+            [hmm0,fehist0,feterms0,rho0] = hmmstrain(data,T,hmm_init,info,options);
+            if fehist0(end)<fehist(end)
+                fehist = fehist0; hmm = hmm0; feterms = feterms0; rho = rho0;
+            end
+        end
     else
         fehist = []; feterms = []; rho = [];
     end
@@ -215,15 +224,19 @@ if stochastic_learn
        end
     end
     vpath = []; 
-    if options.BIGdecodeGamma && nargout >= 4 && ~options.nessmodel && ~options.id_mixture
+    if options.BIGdecodeGamma && nargout >= 4 && ~options.episodic && ~options.id_mixture
        vpath = hmmdecode(data,T,hmm,1); 
     end
     
 else
     
     % Standardise data and control for ackward trials
-    valid_dims = computeValidDimensions(data,options);
-    data = standardisedata(data,T,options.standardise,valid_dims); 
+    if length(options.embeddedlags) > 1  
+        data = standardisedata(data,T,options.standardise);
+    else
+        valid_dims = computeValidDimensions(data,options);
+        data = standardisedata(data,T,options.standardise,valid_dims);
+    end
     % Filtering
     if ~isempty(options.filter)
        data = filterdata(data,T,options.Fs,options.filter);
@@ -264,8 +277,7 @@ else
         elmsg = ''; 
     end
     % PCA transform
-    if length(options.pca) > 1 || (options.pca > 0 && options.pca ~= 1) || ...
-            isfield(options,'A')
+    if length(options.pca) > 1 || (options.pca > 0) || isfield(options,'A')
         if isfield(options,'A')
             data.X = bsxfun(@minus,data.X,mean(data.X));   
             data.X = data.X * options.A; 
@@ -286,7 +298,7 @@ else
         data = standardisedata(data,T,options.standardise_pc);
         options.ndim = size(options.A,2);
         options.S = ones(options.ndim);
-        options.Sind = formindexes(options.orders,options.S);
+        options.Sind = formindexes(options.orders,options.S) == 1;
         if ~options.zeromean, options.Sind = [true(1,size(options.Sind,2)); options.Sind]; end
     else
         options.ndim = size(data.X,2);
@@ -314,13 +326,25 @@ else
     is_there_hmm = false;
     if isempty(options.Gamma) && isempty(options.hmm) % both unspecified
         if options.K > 1
-            Sind = options.Sind;
-            if options.initrep>0 && options.initcyc>0 && options.nessmodel
-                GammaInit = hmmmar_init_ness(data,T,options,Sind);
+            if options.episodic && ...
+                    ((options.initrep>0 && options.initcyc>0) || ...
+                    isfield(options,'ehmm_init_from_hmm'))
+                GammaInit = ehmminit(data,T,options);  
+                if isfield(options,'ehmm_init_from_hmm')
+                    options = rmfield(options,'ehmm_init_from_hmm'); 
+                end
+                if size(GammaInit,2) < options.K
+                    options.K = size(GammaInit,2);
+                    options.Pstructure = true(options.K);
+                    options.Pistructure = true(1,options.K);
+                    warning(['Number of states has been reduced to ' num2str(options.K) ])
+                end
             elseif options.initrep>0 && options.initcyc>0 && ...
                     (strcmpi(options.inittype,'HMM-MAR') || strcmpi(options.inittype,'HMMMAR'))
-                [hmm_wr,GammaInit,fehistInit] = hmmmar_init(data,T,options,Sind);
+                [hmm,GammaInit,fehistInit] = hmmmar_init(data,T,options);
                 is_there_hmm = true;
+            elseif strcmpi(options.inittype,'window')
+                GammaInit = initGamma_window(data,T,options);
             elseif strcmpi(options.inittype,'sequential')
                 GammaInit = initGamma_seq(T-options.maxorder,options.K);
             elseif options.initrep>0 &&  strcmpi(options.inittype,'EM')
@@ -331,9 +355,15 @@ else
                 error('GMM init is deprecated; use HMM-MAR initialisation instead')
                 %options.Gamma = gmm_init(data,T,options);
             elseif strcmpi(options.inittype,'random') || options.initrep==0 || options.initcyc==0
-                GammaInit = initGamma_random(T-options.maxorder,options.K,...
-                    options.DirichletDiag,options.Pstructure,options.Pistructure,...
-                    options.priorOFFvsON);
+                if options.episodic
+                    GammaInit = initGamma_random(T-options.maxorder,options.K,...
+                        options.DirichletDiag,options.Pstructure,options.Pistructure,...
+                        options.ehmm_priorOFFvsON);
+                else
+                    tminus = options.maxorder+2*options.embeddedlags_batched(end);
+                    GammaInit = initGamma_random(T-tminus,options.K,...
+                        options.DirichletDiag,options.Pstructure,options.Pistructure);
+                end
             else
                 error('Unknown init method')
             end
@@ -342,7 +372,7 @@ else
             GammaInit = options.Gamma;
         end
     elseif isempty(options.Gamma) && ~isempty(options.hmm) % Gamma unspecified, hmm specified
-        if options.nessmodel
+        if options.episodic
             GammaInit = zeros(sum(T)-length(T)*options.maxorder,options.K);
         else
             GammaInit = [];
@@ -359,7 +389,7 @@ else
 
     % If initialization Gamma has fewer states than options.K, put those states back in
     % and renormalize
-    if ~isempty(GammaInit) && (size(GammaInit,2) < options.K) && ~options.nessmodel
+    if ~isempty(GammaInit) && (size(GammaInit,2) < options.K) && ~options.episodic
         % States were knocked out, but semisupervised in use, so put them back
         GammaInit = [GammaInit 0.0001*rand(size(GammaInit,1),options.K-size(GammaInit,2))];
         GammaInit = bsxfun(@rdivide,GammaInit,sum(GammaInit,2));
@@ -367,101 +397,95 @@ else
 
     if is_there_hmm
         if do_HMM_pca
-            residuals_wr = [];
+            residuals = [];
         elseif isfield(options,'distribution') && strcmp(options.distribution,'logistic')
-            residuals_wr = getresidualslogistic(data.X,T,options.logisticYdim); 
+            residuals = getresidualslogistic(data.X,T,options.logisticYdim); 
         else
-            residuals_wr =  getresiduals(data.X,T,hmm_wr.train.Sind,hmm_wr.train.maxorder,...
-                hmm_wr.train.order,hmm_wr.train.orderoffset,hmm_wr.train.timelag,...
-                hmm_wr.train.exptimelag,hmm_wr.train.zeromean);
+            residuals =  getresiduals(data.X,T,hmm.train.S,hmm.train.maxorder,...
+                hmm.train.order,hmm.train.orderoffset,hmm.train.timelag,...
+                hmm.train.exptimelag,hmm.train.zeromean);
         end
     elseif isempty(options.hmm) % Initialisation of the hmm
         % GammaInit is required for obsinit, or for hmmtrain when updateGamma==0
-        hmm_wr = struct('train',struct());
-        hmm_wr.K = options.K;
-        hmm_wr.train = options;
-        hmm_wr = hmmhsinit(hmm_wr,GammaInit,T);
-        [hmm_wr,residuals_wr] = obsinit(data,T,hmm_wr,GammaInit);
+        hmm = struct('train',struct());
+        hmm.K = options.K;
+        hmm.train = options;
+        hmm = hmmhsinit(hmm,GammaInit,T);
+        [hmm,residuals] = obsinit(data,T,hmm,GammaInit);
         if isfield(options,'distribution') && strcmp(options.distribution,'logistic')
-            residuals_wr = getresidualslogistic(data.X,T,options.logisticYdim); 
+            residuals = getresidualslogistic(data.X,T,options.logisticYdim);
         end
     else % using a warm restart from a previous run
-        hmm_wr = versCompatibilityFix(options.hmm);
+        hmm = versCompatibilityFix(options.hmm);
         options = rmfield(options,'hmm');
-        train = hmm_wr.train; 
-        hmm_wr.train = options;
-        hmm_wr.train.active = train.active;  
+        train = hmm.train;
+        hmm.train = options;
+        hmm.train.active = train.active;
         % set priors
-        Dir2d_alpha = hmm_wr.Dir2d_alpha; Dir_alpha = hmm_wr.Dir_alpha; P = hmm_wr.P; Pi = hmm_wr.Pi;
-        if isfield(hmm_wr,'prior') && isfield(hmm_wr.prior,'Omega'), Omega_prior = hmm_wr.prior.Omega; end
-        if isfield(hmm_wr,'prior'), hmm_wr = rmfield(hmm_wr,'prior'); end
-        hmm_wr = hmmhsinit(hmm_wr); 
-        hmm_wr.Dir2d_alpha = Dir2d_alpha; hmm_wr.Dir_alpha = Dir_alpha; hmm_wr.P = P; hmm_wr.Pi = Pi; 
-        if exist('Omega_prior','var'), hmm_wr.prior.Omega = Omega_prior; end
+        if options.episodic
+            Dir2d_alpha = cell(options.K,1); P = cell(options.K,1); priors = cell(options.K,1);
+            for k = 1:options.K
+                Dir2d_alpha{k} = hmm.state(k).Dir2d_alpha; P{k} = hmm.state(k).P;
+                priors{k} = hmm.state(k).prior;
+            end
+        else
+            Dir2d_alpha = hmm.Dir2d_alpha; Dir_alpha = hmm.Dir_alpha; P = hmm.P; Pi = hmm.Pi;
+        end
+        if isfield(hmm,'prior') && isfield(hmm.prior,'Omega'), Omega_prior = hmm.prior.Omega; end
+        if isfield(hmm,'prior'), hmm = rmfield(hmm,'prior'); end
+        hmm = hmmhsinit(hmm);
+        if options.episodic
+            for k = 1:options.K
+                hmm.state(k).Dir2d_alpha = Dir2d_alpha{k}; hmm.state(k).P = P{k};
+                hmm.state(k).prior = priors{k};
+            end
+        else
+            hmm.Dir2d_alpha = Dir2d_alpha; hmm.Dir_alpha = Dir_alpha; hmm.P = P; hmm.Pi = Pi;
+        end
+        
+        if exist('Omega_prior','var'), hmm.prior.Omega = Omega_prior; end
         % get residuals
         if ~isfield(options,'distribution') || ~strcmp(options.distribution,'logistic')
-            residuals_wr = getresiduals(data.X,T,hmm_wr.train.Sind,hmm_wr.train.maxorder,hmm_wr.train.order,...
-                hmm_wr.train.orderoffset,hmm_wr.train.timelag,hmm_wr.train.exptimelag,hmm_wr.train.zeromean);
+            residuals = getresiduals(data.X,T,hmm.train.S,hmm.train.maxorder,hmm.train.order,...
+                hmm.train.orderoffset,hmm.train.timelag,hmm.train.exptimelag,hmm.train.zeromean);
         elseif do_HMM_pca
-            residuals_wr = [];
+            residuals = [];
         else
-            residuals_wr = getresidualslogistic(data.X,T,options.logisticYdim); 
+            residuals = getresidualslogistic(data.X,T,options.logisticYdim);
         end
     end
     
-    if hmm_wr.train.tudamonitoring
-        hmm_wr.tudamonitor = struct();
-        hmm_wr.tudamonitor.synch = zeros(hmm_wr.train.cyc+1,T(1)-1);
-        hmm_wr.tudamonitor.accuracy = zeros(hmm_wr.train.cyc+1,T(1)-1);
+    if hmm.train.tudamonitoring
+        hmm.tudamonitor = struct();
+        hmm.tudamonitor.synch = zeros(hmm.train.cyc+1,T(1)-1);
+        hmm.tudamonitor.accuracy = zeros(hmm.train.cyc+1,T(1)-1);
         sy = getSynchronicity(GammaInit,T);
-        hmm_wr.tudamonitor.synch(1,:) = sy;
-        which_x = (hmm_wr.train.S(1,:) == -1);
-        which_y = (hmm_wr.train.S(1,:) == 1);
-        hmm_wr.tudamonitor.accuracy(1,:) = ...
-            getAccuracy(residuals_wr(:,which_x),residuals_wr(:,which_y),T,GammaInit,[],0);
-        if ~isempty(hmm_wr.train.behaviour)
-            fs = fields(hmm_wr.train.behaviour);
-            hmm_wr.tudamonitor.behaviour = struct();
+        hmm.tudamonitor.synch(1,:) = sy;
+        which_x = (hmm.train.S(1,:) == -1);
+        which_y = (hmm.train.S(1,:) == 1);
+        hmm.tudamonitor.accuracy(1,:) = ...
+            getAccuracy(residuals(:,which_x),residuals(:,which_y),T,GammaInit,[],0);
+        if ~isempty(hmm.train.behaviour)
+            fs = fields(hmm.train.behaviour);
+            hmm.tudamonitor.behaviour = struct();
             for ifs = 1:length(fs)
-                y = hmm_wr.train.behaviour.(fs{ifs});
+                y = hmm.train.behaviour.(fs{ifs});
                 f = getBehAssociation(GammaInit,y,T,sy);
-                hmm_wr.tudamonitor.behaviour.(fs{ifs}) = f;
-            end
-        end        
-    end
-    
-    fehist = Inf;
-    if isfield(hmm_wr.train,'Gamma'), hmm_wr.train = rmfield(hmm_wr.train,'Gamma'); end
-    if ~options.nessmodel
-        for it = 1:options.repetitions
-            hmm0 = hmm_wr;
-            [hmm0,Gamma0,Xi0,fehist0] = hmmtrain(data,T,hmm0,GammaInit,residuals_wr,fehistInit);
-            if options.updateGamma && (fehist0(end)<fehist(end))
-                fehist = fehist0; hmm = hmm0;
-                residuals = residuals_wr; Gamma = Gamma0; Xi = Xi0;
-            elseif ~options.updateGamma
-                fehist = []; hmm = hmm0;
-                residuals = []; Gamma = GammaInit; Xi = [];
+                hmm.tudamonitor.behaviour.(fs{ifs}) = f;
             end
         end
+    end
+    
+    if isfield(hmm.train,'Gamma'), hmm.train = rmfield(hmm.train,'Gamma'); end
+    if options.episodic
+        Xi = []; residuals = [];
+        [hmm,Gamma,fehist] = ehmmtrain(data,T,hmm,GammaInit,residuals);
     else
-        Xi = []; 
-        [hmm,Gamma,fehist] = nesstrain(data,T,hmm_wr,GammaInit,residuals_wr);
-    end
-    
-    if options.repetitions == 0
-        hmm0 = hmm_wr;
-        hmm0.train.updateObs = 0;
-        if options.nessmodel
-            [~,Gamma] = nesstrain(data,T,hmm0,GammaInit,residuals_wr,fehistInit); Xi = []; 
-        else
-            [~,Gamma,Xi] = hmmtrain(data,T,hmm0,GammaInit,residuals_wr,fehistInit);
-        end
-        fehist = []; hmm = hmm0; residuals = []; 
+        [hmm,Gamma,Xi,fehist] = hmmtrain(data,T,hmm,GammaInit,residuals,fehistInit);
     end
     
     vpath = [];
-    if options.decodeGamma && nargout >= 4 && ~options.nessmodel && ~options.id_mixture
+    if options.decodeGamma && nargout >= 4 && ~options.episodic && ~options.id_mixture
         vpath = hmmdecode(data.X,T,hmm,1,residuals,0);
         if ~options.keepS_W
             for k = 1:hmm.K
@@ -469,7 +493,7 @@ else
             end
         end   
     end
-    hmm.train = rmfield(hmm.train,'Sind');
+    %hmm.train = rmfield(hmm.train,'Sind');
     
     feterms = []; rho = [];
     

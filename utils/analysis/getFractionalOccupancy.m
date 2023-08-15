@@ -62,7 +62,8 @@ if ~isfield(options,'order') && ~isfield(options,'embeddedlags')
    options.order = (sum(T) - size(Gamma,1)) / length(T);
 end
 
-if isfield(options,'tuda') && options.tuda
+if isfield(options,'tuda') && options.tuda | ...
+        isfield(options, 'order') && options.order == 0
     T = ceil(r * T);
 elseif isfield(options,'order') && options.order > 0
     T = ceil(r * T);
@@ -76,7 +77,11 @@ end
 
 if is_vpath % viterbi path
     vpath = Gamma; 
-    K = length(unique(vpath));
+    if options.dropstates==1
+        K = length(unique(vpath));
+    else
+        K = options.K;
+    end
     Gamma = zeros(length(vpath),K);
     for k = 1:K
        Gamma(vpath==k,k) = 1;   

@@ -13,6 +13,9 @@ N = length(T);
 p = size(X,2);
 
 if any(isnan(Y(:))), error('NaN found in Y'); end
+if ~isfield(options,'Y_is_continuous') %ie not discrete
+    options.Y_is_continuous = length(unique(Y(:))) > 50;
+end
 
 if size(X,1) ~= sum(T), error('Dimension of X not correct'); end
 if size(Y,1) < size(Y,2); Y = Y'; end
@@ -35,7 +38,7 @@ if ~isfield(options,'classifier'), options.classifier = ''; end
 if ~isfield(options,'Nfeatures'), Nfeatures = p;
 else, Nfeatures = options.Nfeatures; end
 if ~isfield(options,'standardise'), standardise = 0;
-else, standardise = options.standardise; end
+else, standardise = options.standardise; end % otherwise it's done per trial
 if ~isfield(options,'onpower'), onpower = 0;
 else, onpower = options.onpower; end
 if ~isfield(options,'embeddedlags'), embeddedlags = 0;
@@ -49,6 +52,8 @@ if ~isfield(options,'econ_embed'), econ_embed = 0;
 else, econ_embed = options.econ_embed; end
 if ~isfield(options,'parallel_trials'), parallel_trials = all(T==T(1)) & length(T)>1;
 else, parallel_trials = options.parallel_trials; end
+if ~isfield(options,'acrosstrial_constrained'), options.acrosstrial_constrained = 0; end
+
 if ~isfield(options,'pca'), pca_opt = 0;
 else, pca_opt = options.pca; end
 if ~isfield(options,'A'), A = [];
@@ -96,10 +101,10 @@ if ~isempty(options.classifier) || options.encodemodel
         end
         options = rmfield(options,'intercept');
         if ~isfield(options,'sequential')
-            options.sequential = true;
+            options.sequential = 1;
         end
         if ~isfield(options,'inittype')
-            if options.sequential
+            if options.sequential ~= 0
                 options.inittype = 'sequential';
             else
                 options.inittype = 'HMM-MAR';
@@ -121,14 +126,14 @@ if ~isempty(options.classifier) || options.encodemodel
             q = size(Y,2);
         end
         if ~isfield(options,'covtype')
-            options.covtype = 'uniquefull'; 
+            options.covtype = 'sharedfull'; 
         end
         options=rmfield(options,'intercept');
         if ~isfield(options,'sequential')
-            options.sequential = true;
+            options.sequential = 1;
         end
         if ~isfield(options,'inittype')
-            if options.sequential
+            if options.sequential ~= 0
                 options.inittype = 'sequential';
             else
                 options.inittype = 'HMM-MAR';
@@ -136,11 +141,12 @@ if ~isempty(options.classifier) || options.encodemodel
         end
         options.add_noise = 0;
         add_noise = 0;
-    elseif strcmp(options.classifier,'SVM') || strcmp(options.classifier,'SVM_rbf') || strcmp(options.classifier,'KNN') ||...
+    elseif strcmp(options.classifier,'SVM') || strcmp(options.classifier,'SVM_rbf') || ...
+            strcmp(options.classifier,'KNN') || ...
             strcmp(options.classifier,'decisiontree')
         add_noise = 0;
         demeanstim = false;
-        options.sequential = false;
+        options.sequential = 0;
     elseif strcmp(options.classifier,'regression')
         options.distribution = 'Gaussian';
         demeanstim = false;
@@ -164,12 +170,12 @@ if ~isempty(options.classifier) || options.encodemodel
                 error('Format of Y incorrect for classification tasks');
             end
         end      
-        add_noise = 1;
+        add_noise = ~options.Y_is_continuous;
         if ~isfield(options,'sequential')
-            options.sequential = true;
+            options.sequential = 1;
         end
         if ~isfield(options,'inittype')
-            if options.sequential
+            if options.sequential ~= 0
                 options.inittype = 'sequential';
             else
                 options.inittype = 'HMM-MAR';
@@ -185,11 +191,11 @@ else % Standard regression problem
     else, add_noise = options.add_noise;
     end
     if ~isfield(options,'sequential')
-        options.sequential = true;
+        options.sequential = 1;
     end
     if ~isfield(options,'inittype')
-        if options.sequential
-            options.inittype = 'sequential';
+        if options.sequential ~= 0
+            options.inittype = 'fixedsequential';
         else
             options.inittype = 'HMM-MAR';
         end
@@ -199,17 +205,26 @@ else % Standard regression problem
        X = [X,ones(size(X,1),1)];
     end
     options = rmfield(options,'intercept');
+    if ~isfield(options,'cyc'), options.cyc = 1; end
 end
-if ~isfield(options,'cyc'), options.cyc = 4; end
 
+if ~isfield(options,'cyc'), options.cyc = 25; end
 if ~isfield(options,'logisticYdim'), options.logisticYdim = 0; end
 
 % Set up states to be a a sequence
-if isfield(options,'sequential') && options.sequential
-    options.Pstructure = logical(eye(options.K) + diag(ones(1,options.K-1),1));
+if isfield(options,'sequential') && options.sequential ~= 0
     options.Pistructure = zeros(1,options.K);
-    options.Pistructure(1) = 1;
+    options.Pistructure(1:abs(options.sequential)) = 1;
     options.Pistructure = logical(options.Pistructure);
+    options.Pstructure = logical(eye(options.K));
+    for k = 1:abs(options.sequential)
+        options.Pstructure = options.Pstructure + diag(ones(options.K-k,1),k);
+    end
+    if options.sequential < 0
+        for k = 1:abs(options.sequential)
+            options.Pstructure = options.Pstructure + diag(ones(options.K-k,1),-k);
+        end
+    end
 end
 
 % Options relative to constraints in the trans prob mat
@@ -241,7 +256,7 @@ if strcmp(options.distribution,'logistic')
     options.covtype = '';
 end
 if ~isfield(options,'covtype') && strcmp(options.distribution,'Gaussian')
-    options.covtype = 'uniquediag'; 
+    options.covtype = 'shareddiag'; 
 end
 if ~isfield(options,'inittype'), options.inittype = 'HMM-MAR'; end
 
@@ -262,7 +277,7 @@ if isfield(options,'demeanstim'), options = rmfield(options,'demeanstim'); end
 % Set a high prior for the initial probabilities because otherwise the
 % model is biased to have the first time point of each trial to be assigned
 % to just one state.
-if ~isfield(options,'PriorWeightingPi'), options.PriorWeightingPi = length(T); end
+if ~isfield(options,'PriorWeightingPi'), options.PriorWeightingPi = length(T)/20; end
 if ~isfield(options,'DirichletDiag'), options.DirichletDiag = 100; end
 
 do_embedding = length(embeddedlags)>1;
@@ -290,7 +305,7 @@ if size(Y,1) == N % one value for the entire trial
 end
 
 if q == 1 && length(unique(Y))==2
-    if ismember(0,unique(Y)) || all(unique(Y)>0)
+    if ismember(0,unique(Y)) || all(unique(Y)>0) && ~strcmp(options.distribution,'logistic')
         warning('Seems this is binary classification, transforming stimulus to have elements (-1,+1)')
         if islogical(Y);Y=1*Y;end
         v = unique(Y);

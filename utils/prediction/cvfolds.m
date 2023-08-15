@@ -1,9 +1,37 @@
-function folds = cvfolds(Y,CVscheme,allcs)
-% allcs can be a N x 1 vector with family memberships, an (N x N) matrix
-% with family relationships, or empty.
+function foldsi = cvfolds(Y, CVscheme, allcs, perm)
+% foldsi = cvfolds(Y, CVscheme, allcs, perm)
+%
+% creates (stratified) CV folds using either LOO or k-fold CV, optionally 
+% accounting for family structure
+% 
+% INPUT:
+% Y:            data that should be split into folds. If this is a vector
+%               with more than 4 unique entries, this assumes one
+%               continuous variable. If this is a matrix, this assumes
+%               classes corresponding to the columns in Y and automatically
+%               stratifies
+% CVscheme:     CV scheme to be applied, 0 for LOO, k>1 for k-fold CV
+% allcs:        can be a N x 1 vector with family memberships, an (N x N) 
+%               matrix with family relationships, or empty.
+% perm:         only relevant when using family structure: whether to 
+%               permute subjects when assigning them to folds (if 0, 
+%               subjects will be assigned to folds in the order they 
+%               appear). When not using family structure, subjects are 
+%               always randomly assigned
+%
+% OUTPUT:
+% foldsi:       cell with (k) CV folds containing indices of Y for each
+%               fold
+%
+% Diego Vidaurre
+% edits Christine Ahrends, 2023
 
-if nargin<4, allcs = []; end
+if nargin<3, allcs = []; end
 is_cs_matrix = (size(allcs,2) == 2);
+
+if nargin<4
+    perm=1;
+end
 
 [N,q] = size(Y); 
 
@@ -14,7 +42,8 @@ end
 if isempty(allcs)
     folds = cell(nfolds,1);
     if nfolds==N
-        for j = 1:n, folds{j} = j; end
+        for j = 1:N, folds{j} = j; end
+        foldsi = folds;
         return
     else
         if q > 1
@@ -29,6 +58,7 @@ if isempty(allcs)
     for k = 1:nfolds
         folds{k} = find(c.test(k));
     end
+    foldsi = folds;
     return
 end
 
@@ -43,15 +73,39 @@ counts = zeros(nfolds,q); Scounts = sum(Y);
 foldsDONE = false(nfolds,1); foldsUSED = false(nfolds,1);
 j = 1;
 
+if perm==1
+    indperm = randperm(N);
+    Y = Y(indperm,:);
+end
+
 while j<=N
     if grotDONE(j), j = j+1; continue; end
     Jj = j;
     % pick up all of this family
     if is_cs_matrix
-        if size(find(allcs(:,1)==j),1)>0, Jj=[j allcs(allcs(:,1)==j,2)']; end
+        if perm==1
+            for iii = 1:size(allcs,1)
+                for jjj = 1:N
+                    if allcs(iii,1)==jjj
+                        allcs1(iii,1)=indperm(jjj);
+                    end
+                    if allcs(iii,2)==jjj
+                        allcs1(iii,2)=indperm(jjj);
+                    end
+                end
+            end
+        else
+            allcs1 = allcs;
+        end
+        if size(find(allcs1(:,1)==j),1)>0, Jj=[j allcs1(allcs1(:,1)==j,2)']; end
     else
-        if allcs(j)>0
-            Jj = find(allcs==allcs(j))';
+        if perm==1
+            allcs1 = allcs(indperm);
+        else
+            allcs1 = allcs;
+        end
+        if allcs1(j)>0
+            Jj = find(allcs1==allcs1(j))';
         end
     end; Jj = unique(Jj);
     if do_stratified
@@ -84,6 +138,22 @@ while j<=N
 end
 
 folds = folds(foldsUSED);
+if perm==1
+    foldsi = cell(size(folds));
+    for ii = 1:size(folds,1)
+        for jjj = 1:numel(folds{ii})
+            for n = 1:N
+                if folds{ii}(jjj) == n
+                    foldsi{ii}(jjj) = find(indperm==n);
+                end
+            end
+        end
+    end
+else
+    foldsi = folds;
+end
+                
+
 
 end
 

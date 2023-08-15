@@ -1,8 +1,8 @@
-UPDATING TO THE LATEST VERSION IS STRONGLY RECOMMENDED, DUE TO AN ERROR THAT WAS INTRODUCED AT THE END OF JANUARY 2021, AND CLANED AT THE END OF MARCH 2021.
+UPDATING TO THE LATEST VERSION IS STRONGLY RECOMMENDED, DUE TO AN ERROR THAT WAS RECENTLY FOUND ON THE STOCHASTIC INFERENCE UPDATES.
 
 **HMM-MAR**
 
-Please check the Wiki for the latest documentation, including some basic introduction to the method. If you have issues of questions, it is possible to email us, but please better use the Issues tab on github, so that others can see the response as well.
+Please check the [Wiki](https://github.com/OHBA-analysis/HMM-MAR/wiki) for the latest documentation, including some basic introduction to the method. If you have problems or questions, use the [Issues](https://github.com/OHBA-analysis/HMM-MAR/issues) tab on github, so that others can see the response as well; but please first check if the question has been responded already [here](https://github.com/OHBA-analysis/HMM-MAR/issues?q=is%3Aissue+is%3Aclosed).   
 
 Note: the name of the toolbox is mantained only for historical reasons, and currently contains other observation models other than the multivariate autoregressive model (MAR).
 
@@ -32,8 +32,12 @@ A step-by-step paper detailing the use of the HMM for MEG alongside comprehensiv
 
 > _Andrew J. Quinn, Diego Vidaurre, Romesh Abeysuriya, Robert Becker, Anna C Nobre, Mark W Woolrich (2018). [Task-Evoked Dynamic Network Analysis Through Hidden Markov Modeling](https://www.frontiersin.org/articles/10.3389/fnins.2018.00603/full). **Frontiers in Neuroscience**._
 
-An HMM-based model to find dynamic decoding models, where the states define how, when and where the stimulus is encoded in the brain
+An HMM-based model to find dynamic decoding models, where the states define how, when and where the stimulus is encoded in the brain in
 
 > Diego Vidaurre, Nicholas Myers, Mark Stokes, Anna C Nobre and Mark W. Woolrich (2018). [Temporally unconstrained decoding reveals consistent but time-varying stages of stimulus processing](https://academic.oup.com/cercor/article/29/2/863/5232535). **Cerebral Cortex**.
+
+An HMM where each state is a probabilistic PCA model, so that we can do simultaneous dimensionality reduction and time-varying functional connectivity estimates in
+
+> Diego Vidaurre (2021) [A new model for simultaneous dimensionality reduction and time-varying functional connectivity estimation](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1008580). **PLOS Computational Biology**.
 
 

@@ -1,4 +1,4 @@
-function fit = hmmspectramar(data,T,hmm,Gamma,options)
+function [fit,hmm] = hmmspectramar(data,T,hmm,Gamma,options)
 % Get spectral estimates from MAR model
 % If 'hmm' is specified, it will interrogate its MAR parameters
 % If not, will recompute the MAR using maximum likelihood
@@ -31,9 +31,13 @@ function fit = hmmspectramar(data,T,hmm,Gamma,options)
 %
 % Author: Diego Vidaurre, OHBA, University of Oxford (2014)
 
-if nargin < 5, options = struct(); end
 if nargin < 4, Gamma = []; end
 if nargin < 3, hmm = []; end
+if nargin < 5
+    if isempty(hmm), options = struct(); 
+    else, options = hmm.train;
+    end
+end
 
 MLestimation = isempty(hmm) || ~isfield(hmm.state(1),'W') || isempty(hmm.state(1).W.Mu_W);
 
@@ -201,6 +205,10 @@ if MLestimation
         end
         Gamma = Gamma2; clear Gamma2
     end
+    if K > 1
+        Gamma = rdiv(Gamma,sum(Gamma,2));
+        Gamma(isnan(Gamma)) = 0;
+    end
 else
     options = checkoptions_spectra(options,[],T,0);
 end
@@ -247,8 +255,8 @@ for j = 1:NN
             Xj = data(t0+1:t0+T(j),:); Tj = T(j);
             t0 = sum(T(1:j-1)) - (j-1)*hmm.train.maxorder;
             Gammaj = Gamma(t0+1:t0+T(j)-hmm.train.maxorder,:);
-            Gammasum(j,:) = sum(Gammaj);
         end
+        Gammasum(j,:) = sum(Gammaj);
         hmm = mlhmmmar(Xj,Tj,hmm0,Gammaj,options.completelags);
     end
     for k = 1:K

@@ -21,6 +21,9 @@ end
 if ~isfield(hmm.train,'embeddedlags')
     hmm.train.embeddedlags = 0;
 end
+if ~isfield(hmm.train,'embeddedlags_batched')
+    hmm.train.embeddedlags_batched = 0;
+end
 if ~isfield(hmm.train,'pca')
     hmm.train.pca = 0;
 end
@@ -75,7 +78,13 @@ end
 if ~isfield(hmm.train,'Gamma_constraint')
     hmm.train.Gamma_constraint = [];
 end
-if ~isfield(hmm.train,'nessmodel')
-    hmm.train.nessmodel = 0;
+if ~isfield(hmm.train,'Gamma_constraint_radius')
+    hmm.train.Gamma_constraint = [];
+end
+if ~isfield(hmm.train,'acrosstrial_constrained')
+    hmm.train.acrosstrial_constrained = [];
+end
+if ~isfield(hmm.train,'episodic')
+    hmm.train.episodic = 0;
 end
 end

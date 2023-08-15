@@ -1,4 +1,4 @@
-function L = obslike(X,hmm,residuals,XX,cache,cv)
+function L = obslike(X,hmm,residuals,XX,cache,dont_rescale)
 %
 % Evaluate likelihood of data given observation model, for one continuous trial
 %
@@ -18,10 +18,12 @@ if nargin < 5 || isempty(cache)
 else
     use_cache = true;
 end
+if nargin < 6, dont_rescale = 0; end
 
 p = hmm.train.lowrank; do_HMM_pca = (p > 0);
 K = hmm.K; rangeK = 1:K;
-if nargin < 6, cv = 0; end
+sharedcovmat = strcmpi(hmm.train.covtype,'uniquediag') || strcmpi(hmm.train.covtype,'uniquefull') || ...
+    strcmpi(hmm.train.covtype,'shareddiag') || strcmpi(hmm.train.covtype,'sharedfull');
 
 if nargin<4 || size(XX,1)==0
     [T,ndim] = size(X);
@@ -41,24 +43,23 @@ if ~do_HMM_pca && (nargin<3 || isempty(residuals))
         if hmm.train.pcapred==0
             orders = formorders(hmm.train.order,hmm.train.orderoffset,...
                 hmm.train.timelag,hmm.train.exptimelag);
-            hmm.train.Sind = formindexes(orders,hmm.train.S);
+            hmm.train.Sind = formindexes(orders,hmm.train.S) == 1;
         else
-            hmm.train.Sind = ones(hmm.train.pcapred,ndim);
+            hmm.train.Sind = true(hmm.train.pcapred,ndim);
         end
     end
     if ~hmm.train.zeromean, hmm.train.Sind = [true(1,ndim); hmm.train.Sind]; end
-    residuals =  getresiduals(X,T,hmm.train.Sind,hmm.train.maxorder,hmm.train.order,...
+    residuals =  getresiduals(X,T,hmm.train.S,hmm.train.maxorder,hmm.train.order,...
         hmm.train.orderoffset,hmm.train.timelag,hmm.train.exptimelag,hmm.train.zeromean);
 end
 
+setstateoptions;
+
 T = T - hmm.train.maxorder;
-S = hmm.train.S==1;
-regressed = sum(S,1)>0;
 ltpi = sum(regressed)/2 * log(2*pi);
 L = zeros(T+hmm.train.maxorder,length(rangeK));
 
-if use_cache && ...
-        (strcmpi(hmm.train.covtype,'uniquediag') || strcmpi(hmm.train.covtype,'uniquefull'))
+if use_cache && sharedcovmat
     ldetWishB = cache.ldetWishB{1};
     PsiWish_alphasum  = cache.PsiWish_alphasum{1};
     C = cache.C{1};
@@ -66,7 +67,7 @@ elseif do_HMM_pca
     % This is done later because ldetWishB needs W, so it's state dependent
     ldetWishB = 0;
     PsiWish_alphasum = 0;
-elseif strcmpi(hmm.train.covtype,'uniquediag')
+elseif strcmpi(hmm.train.covtype,'uniquediag') || strcmpi(hmm.train.covtype,'shareddiag')
     ldetWishB = 0;
     PsiWish_alphasum = 0;
     for n = 1:ndim
@@ -75,7 +76,7 @@ elseif strcmpi(hmm.train.covtype,'uniquediag')
         PsiWish_alphasum = PsiWish_alphasum+0.5*psi(hmm.Omega.Gam_shape);
     end
     C = hmm.Omega.Gam_shape ./ hmm.Omega.Gam_rate;
-elseif strcmpi(hmm.train.covtype,'uniquefull')
+elseif strcmpi(hmm.train.covtype,'uniquefull') || strcmpi(hmm.train.covtype,'sharedfull')
     ldetWishB = 0.5*logdet(hmm.Omega.Gam_rate(regressed,regressed));
     PsiWish_alphasum = 0;
     for n = 1:sum(regressed)
@@ -85,21 +86,10 @@ elseif strcmpi(hmm.train.covtype,'uniquefull')
     C = hmm.Omega.Gam_shape * hmm.Omega.Gam_irate;
 end
 
-if (~use_cache || do_HMM_pca)
-    setstateoptions;
-end
-
 for ik = 1:length(rangeK)
     
     k = rangeK(ik);
-    
-    % some temporal variables
-    if use_cache
-        train = cache.train{k};
-        orders = cache.orders{k};
-        Sind = cache.Sind{k};
-    end
-    
+
     % put together covariance-related variables
     if use_cache % pull state cov matrices and related stuff
         ldetWishB = cache.ldetWishB{k};
@@ -110,6 +100,7 @@ for ik = 1:length(rangeK)
         end
         
     else
+        WishTrace =[];
         if do_HMM_pca
             W = hmm.state(k).W.Mu_W;
             v = hmm.Omega.Gam_rate / hmm.Omega.Gam_shape;
@@ -169,7 +160,8 @@ for ik = 1:length(rangeK)
         d = residuals(:,regressed) - meand;
         dist = zeros(T,1);
         
-        if strcmp(train.covtype,'diag') || strcmp(train.covtype,'uniquediag')
+        if strcmp(train.covtype,'diag') || strcmp(train.covtype,'uniquediag') || ...
+                strcmp(train.covtype,'shareddiag')
             Cd = bsxfun(@times,C(regressed),d)';
         else
             Cd = C(regressed,regressed) * d';
@@ -184,7 +176,7 @@ for ik = 1:length(rangeK)
     NormWishtrace = zeros(T,1);
     if ~do_HMM_pca && ~isempty(hmm.state(k).W.Mu_W(:))
         switch train.covtype
-            case {'diag','uniquediag'}
+            case {'diag','uniquediag','shareddiag'}
                 for n = 1:ndim
                     if ~regressed(n), continue; end
                     if train.uniqueAR
@@ -202,7 +194,7 @@ for ik = 1:length(rangeK)
                             .* XX(:,Sind(:,n)), 2);
                     end
                 end
-            case {'full','uniquefull'}
+            case {'full','uniquefull','sharedfull'}
                 if isempty(orders)
                     NormWishtrace = 0.5 * sum(sum(C .* hmm.state(k).W.S_W));
                 else
@@ -230,7 +222,7 @@ for ik = 1:length(rangeK)
                         B_S = hmm.state(k).W.S_W(validentries,validentries);
                         for iT = 1:T
                             NormWishtrace(iT) = trace(kron(C(regressed,regressed),...
-                                residuals(1,~regressed)'*residuals(1,~regressed))*B_S);
+                                residuals(iT,~regressed)'*residuals(iT,~regressed))*B_S);
                         end
                     else
                         % implies a static regressor value over full course of each trial
@@ -250,11 +242,14 @@ for ik = 1:length(rangeK)
         end
     end
     
-    L(hmm.train.maxorder+1:end,ik)= - ltpi - ldetWishB + PsiWish_alphasum + dist - NormWishtrace;
+    L(hmm.train.maxorder+1:end,ik)= - ltpi - ldetWishB + ...
+        PsiWish_alphasum + dist - NormWishtrace;    
+    
 end
 % correct for stability problems by adding constant:
-if any(all(L<0,2)) && ~cv
-    L(all(L<0,2),:) = L(all(L<0,2),:) - repmat(max(L(all(L<0,2),:),[],2),1,length(rangeK));
+if any(all(L<0,2)) && ~dont_rescale
+    L(all(L<0,2),:) = L(all(L<0,2),:) - ...
+        repmat(max(L(all(L<0,2),:),[],2),1,length(rangeK));
 end
 L = exp(L);
 end

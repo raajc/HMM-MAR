@@ -13,7 +13,7 @@ function [Gamma,Xi,scale] = fb_Gamma_inference(XX,hmm,residuals,slicepoints,cons
 %         hmm.train.Sind = formindexes(orders,hmm.train.S);
 %     end
 %     if ~hmm.train.zeromean, hmm.train.Sind = [true(1,ndim); hmm.train.Sind]; end
-%     residuals =  getresiduals(data.X,T,hmm.train.Sind,hmm.train.maxorder,hmm.train.order,...
+%     residuals =  getresiduals(data.X,T,hmm.train.S,hmm.train.maxorder,hmm.train.order,...
 %         hmm.train.orderoffset,hmm.train.timelag,hmm.train.exptimelag,hmm.train.zeromean);
 % end
 
@@ -24,7 +24,6 @@ else
 end
 T = size(residuals,1) + order;
 Xi = [];
-K = length(hmm.state);
 
 if nargin<4, slicepoints = []; end
 if nargin<5, constraint = []; end
@@ -40,13 +39,18 @@ P = hmm.P; Pi = hmm.Pi;
 if ~isfield(hmm,'cache'), hmm.cache = []; end
 
 try
-    if ~isfield(hmm.train,'distribution') || ~strcmp(hmm.train.distribution,'logistic')
+    if ~isfield(hmm.train,'distribution') || strcmp(hmm.train.distribution,'Gaussian')
         L = obslike([],hmm,residuals,XX,hmm.cache,cv);
-    else
+    elseif strcmp(hmm.train.distribution ,'bernoulli')
+        L = obslikebernoulli(residuals,hmm);
+    elseif strcmp(hmm.train.distribution ,'poisson')
+        L = obslikepoisson(residuals,hmm);
+    elseif strcmp(hmm.train.distribution ,'logistic')
         L = obslikelogistic([],hmm,residuals,XX,slicepoints);
     end
-catch
-    error('obslike function is giving trouble - Out of precision?')
+catch exception
+    disp('obslike function is giving trouble - Out of precision?')
+    throw(exception)
 end
 
 if isfield(hmm.train,'id_mixture') && hmm.train.id_mixture
@@ -58,7 +62,7 @@ L(L<realmin) = realmin;
 L(L>realmax) = realmax;
 
 if hmm.train.useMEX 
-    [Gamma, Xi] = hidden_state_inference_mx(L, Pi, P, order);
+    [Gamma, Xi, ~] = hidden_state_inference_mx(L, Pi, P, order);
     if any(isnan(Gamma(:))) || any(isnan(Xi(:)))
         clear Gamma Xi scale
         warning('hidden_state_inference_mx file produce NaNs - will use Matlab''s code')
@@ -67,59 +71,6 @@ if hmm.train.useMEX
     end
 end
 
-scale = zeros(T,1);
-alpha = zeros(T,K);
-beta = zeros(T,K);
-
-alpha(1+order,:) = Pi.*L(1+order,:);
-scale(1+order) = sum(alpha(1+order,:));
-alpha(1+order,:) = alpha(1+order,:)/scale(1+order);
-for i = 2+order:T
-    alpha(i,:) = (alpha(i-1,:)*P).*L(i,:);
-    scale(i) = sum(alpha(i,:));		% P(X_i | X_1 ... X_{i-1})
-    alpha(i,:) = alpha(i,:)/scale(i);
-end
-
-scale(scale<realmin) = realmin;
-
-beta(T,:) = ones(1,K)/scale(T);
-for i = T-1:-1:1+order
-    beta(i,:) = (beta(i+1,:).*L(i+1,:))*(P')/scale(i);
-    beta(i,beta(i,:)>realmax) = realmax;
-end
-
-if any(isnan(beta(:)))
-    warning(['State time courses became NaN (out of precision). ' ...
-        'There are probably extreme events in the data. ' ...
-        'Using an approximation..' ])
-    Gamma = alpha; out_precision = true; 
-else
-    Gamma = (alpha.*beta); out_precision = false; 
-end
-
-if ~isempty(constraint)
-    try
-        Gamma(1+order:T,:) = Gamma(1+order:T,:) .* constraint;
-    catch
-        error(['options.Gamma_constraint must be (trial time X K), ' ...
-            ' and all trials must have the same length' ])
-    end
-end
-
-Gamma = Gamma(1+order:T,:);
-Gamma = rdiv(Gamma,sum(Gamma,2));
-
-if out_precision
-    Xi = approximateXi(Gamma,size(Gamma,1)+order,hmm);
-    Xi = reshape(Xi,[size(Xi,1) size(Xi,2)*size(Xi,3)]);
-else
-    Xi = zeros(T-1-order,K*K);
-    for i = 1+order:T-1
-        t = P.*( alpha(i,:)' * (beta(i+1,:).*L(i+1,:)));
-        Xi(i-order,:) = t(:)'/sum(t(:));
-    end
-end
-
-scale = scale(1+order:end);
+[Gamma,Xi,scale] = fb_Gamma_inference_sub(L,P,Pi,T,order,constraint);
 
 end

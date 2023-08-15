@@ -38,10 +38,10 @@ options.useParallel = 0;
 %options.grouping = [1 1 1 1 1 1 1 1]; 
 %options.grouping = [1 1 1 1 2 2 2 2];
 
-for covtype = {'full','diag','uniquefull','uniquediag'}
+for covtype = {'full','diag','sharedfull','shareddiag'}
     for order = [0 2]
         for zeromean = [0 1]
-            if (strcmp(covtype,'uniquefull') || strcmp(covtype,'uniquediag')) ...
+            if (strcmp(covtype,'sharedfull') || strcmp(covtype,'shareddiag')) ...
                     && zeromean==1 && order==0
                 continue;
             end
@@ -97,6 +97,14 @@ end
 
 options.embeddedlags = 0; 
 
+% HMM-PCA
+options_pca = struct();
+options_pca.K = 2; 
+options_pca.lowrank = 2;
+options_pca.verbose = 0; 
+options_pca.useParallel = 0; 
+[hmm,Gamma,Xi,vpath,~,~,fe] = hmmmar(X,T,options_pca);
+
 % random initialization
 options.inittype = 'random';
 [hmm,Gamma,Xi,vpath,~,~,fe] = hmmmar(X,T,options);
@@ -116,10 +124,10 @@ for i=1:4
 end
 options.downsample = 0; 
 
-for covtype = {'full','diag','uniquefull','uniquediag'}
+for covtype = {'full','diag','sharedfull','shareddiag'}
     for order = [0 2]
         for zeromean = [0 1]
-            if (strcmp(covtype,'uniquefull') || strcmp(covtype,'uniquediag')) ...
+            if (strcmp(covtype,'sharedfull') || strcmp(covtype,'shareddiag')) ...
                     && zeromean==1 && order==0
                 continue;
             end
@@ -191,10 +199,10 @@ options.BIGdelay = 1;
 options.BIGforgetrate = 0.7;
 options.BIGbase_weights = 0.9;
     
-for covtype = {'full','diag'} %,'uniquefull','uniquediag'}
+for covtype = {'full','diag'} %,'sharedfull','shareddiag'}
     for order = [0 2]
         for zeromean = [0 1]
-            if (strcmp(covtype,'uniquefull') || strcmp(covtype,'uniquediag')) ...
+            if (strcmp(covtype,'sharedfull') || strcmp(covtype,'shareddiag')) ...
                     && zeromean==1 && order==0
                 continue;
             end
